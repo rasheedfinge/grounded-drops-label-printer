@@ -20,6 +20,10 @@ MongoClient.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/ground
   })
   .catch(err => console.error('❌ MongoDB connection error:', err));
 
+// Shopify API Configuration
+const SHOPIFY_DOMAIN = process.env.SHOPIFY_DOMAIN || 'grounded-drops.myshopify.com';
+const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
+
 // Serve the main app
 app.get('/', (req, res) => {
   res.send(`
@@ -66,6 +70,17 @@ app.get('/', (req, res) => {
         .header p {
             color: #666;
             font-size: 16px;
+        }
+        
+        .shopify-status {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-size: 12px;
         }
         
         .form-group {
@@ -261,7 +276,11 @@ app.get('/', (req, res) => {
     <div class="container">
         <div class="header">
             <h1>🍃 Grounded Drops</h1>
-            <p>Thermal Label Printer</p>
+            <p>Shopify-Connected Label Printer</p>
+        </div>
+        
+        <div class="shopify-status">
+            ✅ Connected to Shopify • Creates REAL discount codes
         </div>
         
         <div class="quick-buttons">
@@ -384,7 +403,7 @@ app.get('/', (req, res) => {
             
             setTimeout(() => {
                 status.style.display = 'none';
-            }, 3000);
+            }, 5000);
         }
         
         // Preview label
@@ -424,7 +443,7 @@ app.get('/', (req, res) => {
                 const result = await response.json();
                 
                 if (response.ok) {
-                    showStatus(\`Label printed! Code: \${result.code}\`, 'success');
+                    showStatus(\`Label printed! Code: \${result.code} - This discount code is now LIVE in your Shopify store!\`, 'success');
                     updateStats();
                 } else {
                     showStatus(result.error || 'Error printing label', 'error');
@@ -494,7 +513,7 @@ app.post('/api/preview', async (req, res) => {
   }
 });
 
-// API: Print label
+// API: Print label with REAL Shopify integration
 app.post('/api/print', async (req, res) => {
   try {
     const { discountType, discountValue, expiryDays } = req.body;
@@ -503,6 +522,16 @@ app.post('/api/print', async (req, res) => {
     const code = generateUniqueCode();
     const expiryDate = new Date();
     expiryDate.setDate(expiryDate.getDate() + expiryDays);
+    
+    console.log(`Creating Shopify discount code: ${code}`);
+    
+    // Create REAL discount code in Shopify
+    const shopifyDiscountData = await createShopifyDiscountCode({
+      code,
+      discountType,
+      discountValue,
+      expiryDate
+    });
     
     // Create PDF
     const pdfBuffer = await createLabelPDF({
@@ -519,22 +548,104 @@ app.post('/api/print', async (req, res) => {
       discountValue,
       expiryDate,
       createdAt: new Date(),
-      used: false
+      used: false,
+      shopifyPriceRuleId: shopifyDiscountData.priceRuleId,
+      shopifyDiscountCodeId: shopifyDiscountData.discountCodeId
     });
     
-    // In a real thermal printer setup, you'd send this to the printer
-    // For now, we'll save it as a file and return success
+    console.log(`✅ Successfully created Shopify discount: ${code}`);
     
     res.json({ 
       success: true, 
       code,
-      message: 'Label generated successfully!' 
+      message: `Label generated! Discount code ${code} is now LIVE in your Shopify store.`,
+      shopifyCreated: true
     });
   } catch (error) {
     console.error('Print error:', error);
-    res.status(500).json({ error: 'Failed to print label' });
+    res.status(500).json({ error: `Failed to print label: ${error.message}` });
   }
 });
+
+// Create discount code in Shopify
+async function createShopifyDiscountCode({ code, discountType, discountValue, expiryDate }) {
+  try {
+    // Step 1: Create Price Rule
+    const priceRuleData = {
+      price_rule: {
+        title: `Package Insert - ${code}`,
+        target_type: 'line_item',
+        target_selection: 'all',
+        allocation_method: 'across',
+        value_type: discountType === 'percentage' ? 'percentage' : 'fixed_amount',
+        value: discountType === 'percentage' ? `-${discountValue}` : `-${discountValue}.00`,
+        customer_selection: 'all',
+        starts_at: new Date().toISOString(),
+        ends_at: expiryDate.toISOString(),
+        usage_limit: 1,
+        once_per_customer: true
+      }
+    };
+    
+    console.log('Creating price rule:', JSON.stringify(priceRuleData, null, 2));
+    
+    const priceRuleResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2023-10/price_rules.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(priceRuleData)
+    });
+    
+    if (!priceRuleResponse.ok) {
+      const errorText = await priceRuleResponse.text();
+      console.error('Price rule error:', errorText);
+      throw new Error(`Failed to create price rule: ${priceRuleResponse.status} - ${errorText}`);
+    }
+    
+    const priceRuleResult = await priceRuleResponse.json();
+    const priceRuleId = priceRuleResult.price_rule.id;
+    
+    console.log(`✅ Price rule created: ${priceRuleId}`);
+    
+    // Step 2: Create Discount Code
+    const discountCodeData = {
+      discount_code: {
+        code: code
+      }
+    };
+    
+    const discountCodeResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2023-10/price_rules/${priceRuleId}/discount_codes.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(discountCodeData)
+    });
+    
+    if (!discountCodeResponse.ok) {
+      const errorText = await discountCodeResponse.text();
+      console.error('Discount code error:', errorText);
+      throw new Error(`Failed to create discount code: ${discountCodeResponse.status} - ${errorText}`);
+    }
+    
+    const discountCodeResult = await discountCodeResponse.json();
+    
+    console.log(`✅ Discount code created: ${code}`);
+    
+    return {
+      priceRuleId: priceRuleId,
+      discountCodeId: discountCodeResult.discount_code.id,
+      code: code
+    };
+    
+  } catch (error) {
+    console.error('Shopify API Error:', error);
+    throw error;
+  }
+}
 
 // API: Get statistics
 app.get('/api/stats', async (req, res) => {
@@ -562,7 +673,7 @@ app.get('/api/stats', async (req, res) => {
 function generateUniqueCode() {
   const timestamp = Date.now().toString(36);
   const random = crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `GD-${timestamp}-${random}`;
+  return `GD${timestamp}${random}`;
 }
 
 // Create label PDF
@@ -570,7 +681,7 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
   return new Promise(async (resolve, reject) => {
     try {
       const doc = new PDFDocument({ 
-        size: [252, 180], // 3.5" x 2.5" at 72 DPI - slightly taller
+        size: [252, 180], // 3.5" x 2.5" at 72 DPI
         margin: 5,
         layout: 'portrait'
       });
@@ -590,7 +701,7 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
       // Discount offer
       const discountText = discountType === 'percentage' 
         ? `${discountValue}% OFF`
-        : `${discountValue} OFF`;
+        : `$${discountValue} OFF`;
       
       doc.fontSize(18)
          .font('Helvetica-Bold')
@@ -600,8 +711,8 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
          .font('Helvetica')
          .text('NEXT ORDER', 5, 50, { align: 'center', width: 242 });
       
-      // QR Code
-      const qrCodeUrl = `https://groundeddrops.com.au/discount/${code}`;
+      // QR Code - links to actual discount URL
+      const qrCodeUrl = `https://grounded-drops.myshopify.com/discount/${code}`;
       const qrCodeData = await QRCode.toDataURL(qrCodeUrl, {
         width: 80,
         margin: 1,
@@ -633,11 +744,18 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Grounded Drops Label Printer is running!' });
+  res.json({ 
+    status: 'OK', 
+    message: 'Grounded Drops Label Printer is running!',
+    shopifyConnected: !!SHOPIFY_ACCESS_TOKEN,
+    shopifyDomain: SHOPIFY_DOMAIN
+  });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🍃 Grounded Drops Label Printer running on port ${PORT}`);
   console.log(`🖨️ Ready to print discount labels!`);
+  console.log(`🏪 Shopify connected: ${!!SHOPIFY_ACCESS_TOKEN}`);
+  console.log(`🌐 Store: ${SHOPIFY_DOMAIN}`);
 });

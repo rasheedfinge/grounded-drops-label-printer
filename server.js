@@ -570,8 +570,9 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
   return new Promise(async (resolve, reject) => {
     try {
       const doc = new PDFDocument({ 
-        size: [252, 144], // 3.5" x 2" at 72 DPI
-        margin: 10
+        size: [252, 180], // 3.5" x 2.5" at 72 DPI - slightly taller
+        margin: 5,
+        layout: 'portrait'
       });
       
       const buffers = [];
@@ -582,42 +583,46 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
       });
       
       // Header
-      doc.fontSize(14)
+      doc.fontSize(12)
          .font('Helvetica-Bold')
-         .text('☕ GROUNDED DROPS', 0, 15, { align: 'center', width: 252 });
+         .text('☕ GROUNDED DROPS', 5, 10, { align: 'center', width: 242 });
       
       // Discount offer
       const discountText = discountType === 'percentage' 
         ? `${discountValue}% OFF`
-        : `$${discountValue} OFF`;
+        : `${discountValue} OFF`;
       
-      doc.fontSize(16)
+      doc.fontSize(18)
          .font('Helvetica-Bold')
-         .text(`🎁 ${discountText}`, 0, 35, { align: 'center', width: 252 });
+         .text(`🎁 ${discountText}`, 5, 30, { align: 'center', width: 242 });
       
-      doc.fontSize(10)
+      doc.fontSize(9)
          .font('Helvetica')
-         .text('NEXT ORDER', 0, 52, { align: 'center', width: 252 });
+         .text('NEXT ORDER', 5, 50, { align: 'center', width: 242 });
       
       // QR Code
       const qrCodeUrl = `https://groundeddrops.com.au/discount/${code}`;
       const qrCodeData = await QRCode.toDataURL(qrCodeUrl, {
-        width: 60,
-        margin: 1
+        width: 80,
+        margin: 1,
+        color: {
+          dark: '#000000',
+          light: '#FFFFFF'
+        }
       });
       const qrCodeBuffer = Buffer.from(qrCodeData.split(',')[1], 'base64');
       
-      doc.image(qrCodeBuffer, 96, 65, { width: 60, height: 60 });
+      doc.image(qrCodeBuffer, 86, 70, { width: 80, height: 80 });
       
       // Code
-      doc.fontSize(8)
+      doc.fontSize(7)
          .font('Helvetica-Bold')
-         .text(isPreview ? 'PREVIEW-CODE' : code, 0, 130, { align: 'center', width: 252 });
+         .text(isPreview ? 'PREVIEW-CODE' : code, 5, 155, { align: 'center', width: 242 });
       
       // Expiry
-      doc.fontSize(7)
+      doc.fontSize(6)
          .font('Helvetica')
-         .text(`Exp: ${expiryDate.toLocaleDateString()}`, 0, 140, { align: 'center', width: 252 });
+         .text(`Exp: ${expiryDate.toLocaleDateString()}`, 5, 167, { align: 'center', width: 242 });
       
       doc.end();
     } catch (error) {

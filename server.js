@@ -795,7 +795,68 @@ async function createShopifyDiscountCodeFallback({ code, discountType, discountV
   }
 }
 
-// API: Get statistics
+// API: Test Shopify connection
+app.get('/api/test-shopify', async (req, res) => {
+  try {
+    console.log('🔍 Testing Shopify connection...');
+    console.log(`📍 Domain: ${SHOPIFY_DOMAIN}`);
+    console.log(`🔑 Token: ${SHOPIFY_ACCESS_TOKEN ? 'Present' : 'Missing'}`);
+    
+    // Test 1: Try to get shop info
+    const shopResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/shop.json`, {
+      method: 'GET',
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const shopText = await shopResponse.text();
+    console.log(`📥 Shop response (${shopResponse.status}):`, shopText);
+    
+    if (!shopResponse.ok) {
+      return res.json({
+        success: false,
+        error: `Shop API failed: ${shopResponse.status} - ${shopText}`,
+        domain: SHOPIFY_DOMAIN,
+        tokenPresent: !!SHOPIFY_ACCESS_TOKEN
+      });
+    }
+    
+    const shopData = JSON.parse(shopText);
+    
+    // Test 2: Try to list existing price rules
+    const priceRulesResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules.json?limit=1`, {
+      method: 'GET',
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    const priceRulesText = await priceRulesResponse.text();
+    console.log(`📥 Price rules response (${priceRulesResponse.status}):`, priceRulesText);
+    
+    res.json({
+      success: true,
+      shopName: shopData.shop.name,
+      shopDomain: shopData.shop.domain,
+      configuredDomain: SHOPIFY_DOMAIN,
+      priceRulesAccess: priceRulesResponse.ok,
+      priceRulesStatus: priceRulesResponse.status,
+      message: 'Shopify connection test completed'
+    });
+    
+  } catch (error) {
+    console.error('❌ Shopify test error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      domain: SHOPIFY_DOMAIN,
+      tokenPresent: !!SHOPIFY_ACCESS_TOKEN
+    });
+  }
+});
 app.get('/api/stats', async (req, res) => {
   try {
     const today = new Date();
@@ -860,7 +921,7 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
          .text('NEXT ORDER', 5, 50, { align: 'center', width: 242 });
       
       // QR Code - links to actual discount URL
-      const qrCodeUrl = `https://grounded-drops.myshopify.com/discount/${code}`;
+      const qrCodeUrl = `https://gounded-drops.myshopify.com/discount/${code}`;
       const qrCodeData = await QRCode.toDataURL(qrCodeUrl, {
         width: 80,
         margin: 1,

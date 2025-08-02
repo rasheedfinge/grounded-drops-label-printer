@@ -541,17 +541,26 @@ app.post('/api/print', async (req, res) => {
       expiryDate
     });
     
-    // Save to database
-    await db.collection('labels').insertOne({
-      code,
-      discountType,
-      discountValue,
-      expiryDate,
-      createdAt: new Date(),
-      used: false,
-      shopifyPriceRuleId: shopifyDiscountData.priceRuleId,
-      shopifyDiscountCodeId: shopifyDiscountData.discountCodeId
-    });
+    // Save to database (with better error handling)
+    if (db && db.collection) {
+      try {
+        await db.collection('labels').insertOne({
+          code,
+          discountType,
+          discountValue,
+          expiryDate,
+          createdAt: new Date(),
+          used: false,
+          shopifyData: shopifyDiscountData
+        });
+        console.log(`✅ Saved to database: ${code}`);
+      } catch (dbError) {
+        console.error('⚠️ Database save failed (continuing anyway):', dbError.message);
+        // Continue even if database save fails
+      }
+    } else {
+      console.warn('⚠️ Database not available, skipping save');
+    }
     
     console.log(`✅ Successfully created Shopify discount: ${code}`);
     

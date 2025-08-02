@@ -1,0 +1,36 @@
+{
+  "name": "grounded-drops-label-printer",
+  "version": "1.0.0",
+  "description": "Simple thermal label printer for discount codes",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mongodb": "^6.1.0",
+    "qrcode": "^1.5.3",
+    "pdfkit": "^0.13.0",
+    "dotenv": "^16.3.1",
+    "crypto": "^1.0.1",
+    "cors": "^2.8.5"
+  },
+  "engines": {
+    "node": "18.x"
+  },
+  "keywords": [
+    "thermal-printer",
+    "discount-codes",
+    "shopify",
+    "labels",
+    "qr-codes",
+    "package-inserts"
+  ],
+  "author": "Grounded Drops",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "your-github-repo-url"
+  }
+}

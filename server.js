@@ -567,13 +567,170 @@ app.post('/api/print', async (req, res) => {
   }
 });
 
-// Create discount code in Shopify
+// Create discount code in Shopify using GraphQL API (more reliable)
 async function createShopifyDiscountCode({ code, discountType, discountValue, expiryDate }) {
   try {
-    // Step 1: Create Price Rule
+    console.log(`🔧 Creating Shopify discount: ${code}`);
+    
+    // Check if we have access token
+    if (!SHOPIFY_ACCESS_TOKEN) {
+      throw new Error('Shopify access token not configured');
+    }
+    
+    // Create discount using GraphQL API (more modern and reliable)
+    const mutation = `
+      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
+        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
+          codeDiscountNode {
+            id
+            codeDiscount {
+              ... on DiscountCodeBasic {
+                title
+                codes(first: 10) {
+                  nodes {
+                    code
+                  }
+                }
+                startsAt
+                endsAt
+                customerSelection {
+                  ... on DiscountCustomerAll {
+                    allCustomers
+                  }
+                }
+                customerGets {
+                  value {
+                    ... on DiscountPercentage {
+                      percentage
+                    }
+                    ... on DiscountAmount {
+                      amount {
+                        amount
+                        currencyCode
+                      }
+                    }
+                  }
+                  items {
+                    ... on DiscountProducts {
+                      products(first: 10) {
+                        nodes {
+                          id
+                        }
+                      }
+                    }
+                    ... on DiscountCollections {
+                      collections(first: 10) {
+                        nodes {
+                          id
+                        }
+                      }
+                    }
+                  }
+                }
+                minimumRequirement {
+                  ... on DiscountMinimumSubtotal {
+                    greaterThanOrEqualToSubtotal {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+                usageLimit
+              }
+            }
+          }
+          userErrors {
+            field
+            code
+            message
+          }
+        }
+      }
+    `;
+    
+    const variables = {
+      basicCodeDiscount: {
+        title: `Package Insert ${code}`,
+        code: code,
+        startsAt: new Date().toISOString(),
+        endsAt: expiryDate.toISOString(),
+        customerSelection: {
+          all: true
+        },
+        customerGets: {
+          value: discountType === 'percentage' 
+            ? { percentage: discountValue / 100 }
+            : { 
+                discountAmount: {
+                  amount: discountValue,
+                  appliesOnEachItem: false
+                }
+              },
+          items: {
+            all: true
+          }
+        },
+        usageLimit: 1
+      }
+    };
+    
+    console.log('🔄 Sending GraphQL mutation...');
+    
+    const response = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
+      method: 'POST',
+      headers: {
+        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query: mutation,
+        variables: variables
+      })
+    });
+    
+    const responseText = await response.text();
+    console.log(`📥 GraphQL response (${response.status}):`, responseText);
+    
+    if (!response.ok) {
+      throw new Error(`GraphQL request failed: ${response.status} - ${responseText}`);
+    }
+    
+    const result = JSON.parse(responseText);
+    
+    if (result.errors) {
+      throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
+    }
+    
+    if (result.data.discountCodeBasicCreate.userErrors.length > 0) {
+      throw new Error(`Discount creation errors: ${JSON.stringify(result.data.discountCodeBasicCreate.userErrors)}`);
+    }
+    
+    const discountNode = result.data.discountCodeBasicCreate.codeDiscountNode;
+    
+    console.log(`✅ Discount created successfully: ${code}`);
+    
+    return {
+      discountId: discountNode.id,
+      code: code,
+      graphQL: true
+    };
+    
+  } catch (error) {
+    console.error('❌ Shopify API Error:', error.message);
+    
+    // Fallback to simple REST API approach
+    console.log('🔄 Trying fallback REST API approach...');
+    return await createShopifyDiscountCodeFallback({ code, discountType, discountValue, expiryDate });
+  }
+}
+
+// Fallback REST API approach (simpler)
+async function createShopifyDiscountCodeFallback({ code, discountType, discountValue, expiryDate }) {
+  try {
+    // Simple approach: just try to create price rule with minimal data
     const priceRuleData = {
       price_rule: {
-        title: `Package Insert - ${code}`,
+        title: code,
         target_type: 'line_item',
         target_selection: 'all',
         allocation_method: 'across',
@@ -582,14 +739,13 @@ async function createShopifyDiscountCode({ code, discountType, discountValue, ex
         customer_selection: 'all',
         starts_at: new Date().toISOString(),
         ends_at: expiryDate.toISOString(),
-        usage_limit: 1,
-        once_per_customer: true
+        usage_limit: 1
       }
     };
     
-    console.log('Creating price rule:', JSON.stringify(priceRuleData, null, 2));
+    console.log('🔄 Trying REST API fallback...');
     
-    const priceRuleResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2023-10/price_rules.json`, {
+    const priceRuleResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules.json`, {
       method: 'POST',
       headers: {
         'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
@@ -598,52 +754,44 @@ async function createShopifyDiscountCode({ code, discountType, discountValue, ex
       body: JSON.stringify(priceRuleData)
     });
     
+    const priceRuleText = await priceRuleResponse.text();
+    console.log(`📥 REST response (${priceRuleResponse.status}):`, priceRuleText);
+    
     if (!priceRuleResponse.ok) {
-      const errorText = await priceRuleResponse.text();
-      console.error('Price rule error:', errorText);
-      throw new Error(`Failed to create price rule: ${priceRuleResponse.status} - ${errorText}`);
+      throw new Error(`REST API failed: ${priceRuleResponse.status} - ${priceRuleText}`);
     }
     
-    const priceRuleResult = await priceRuleResponse.json();
+    const priceRuleResult = JSON.parse(priceRuleText);
     const priceRuleId = priceRuleResult.price_rule.id;
     
-    console.log(`✅ Price rule created: ${priceRuleId}`);
-    
-    // Step 2: Create Discount Code
-    const discountCodeData = {
-      discount_code: {
-        code: code
-      }
-    };
-    
-    const discountCodeResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2023-10/price_rules/${priceRuleId}/discount_codes.json`, {
+    // Create discount code
+    const discountCodeResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules/${priceRuleId}/discount_codes.json`, {
       method: 'POST',
       headers: {
         'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify(discountCodeData)
+      body: JSON.stringify({
+        discount_code: { code: code }
+      })
     });
     
     if (!discountCodeResponse.ok) {
       const errorText = await discountCodeResponse.text();
-      console.error('Discount code error:', errorText);
-      throw new Error(`Failed to create discount code: ${discountCodeResponse.status} - ${errorText}`);
+      throw new Error(`Discount code creation failed: ${discountCodeResponse.status} - ${errorText}`);
     }
     
-    const discountCodeResult = await discountCodeResponse.json();
-    
-    console.log(`✅ Discount code created: ${code}`);
+    console.log(`✅ REST API fallback successful: ${code}`);
     
     return {
       priceRuleId: priceRuleId,
-      discountCodeId: discountCodeResult.discount_code.id,
-      code: code
+      code: code,
+      fallback: true
     };
     
   } catch (error) {
-    console.error('Shopify API Error:', error);
-    throw error;
+    console.error('❌ Fallback also failed:', error.message);
+    throw new Error(`Both GraphQL and REST API failed. Please check your Shopify app permissions and access token. Last error: ${error.message}`);
   }
 }
 

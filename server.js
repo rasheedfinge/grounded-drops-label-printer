@@ -443,8 +443,31 @@ app.get('/', (req, res) => {
                 const result = await response.json();
                 
                 if (response.ok) {
-                    showStatus(\`Label printed! Code: \${result.code} - This discount code is now LIVE in your Shopify store!\`, 'success');
+                    // Show success message
+                    showStatus(\`Label created! Code: \${result.code} - This discount code is now LIVE in your Shopify store!\`, 'success');
                     updateStats();
+                    
+                    // Open PDF in new tab for printing
+                    setTimeout(async () => {
+                        try {
+                            const pdfResponse = await fetch('/api/print-pdf', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    ...formData,
+                                    code: result.code
+                                })
+                            });
+                            
+                            if (pdfResponse.ok) {
+                                const blob = await pdfResponse.blob();
+                                const url = URL.createObjectURL(blob);
+                                window.open(url, '_blank');
+                            }
+                        } catch (error) {
+                            console.error('Error opening PDF:', error);
+                        }
+                    }, 1000);
                 } else {
                     showStatus(result.error || 'Error printing label', 'error');
                 }
@@ -804,6 +827,30 @@ async function createShopifyDiscountCodeFallback({ code, discountType, discountV
   }
 }
 
+// API: Generate PDF for printing (separate from discount creation)
+app.post('/api/print-pdf', async (req, res) => {
+  try {
+    const { discountType, discountValue, expiryDays, code } = req.body;
+    
+    const expiryDate = new Date();
+    expiryDate.setDate(expiryDate.getDate() + expiryDays);
+    
+    // Create PDF with the provided code
+    const pdfBuffer = await createLabelPDF({
+      code,
+      discountType,
+      discountValue,
+      expiryDate
+    });
+    
+    res.contentType('application/pdf');
+    res.send(pdfBuffer);
+  } catch (error) {
+    console.error('PDF generation error:', error);
+    res.status(500).json({ error: 'Failed to generate PDF for printing' });
+  }
+});
+
 // API: Test Shopify connection
 app.get('/api/test-shopify', async (req, res) => {
   try {
@@ -929,8 +976,8 @@ async function createLabelPDF({ code, discountType, discountValue, expiryDate, i
          .font('Helvetica')
          .text('NEXT ORDER', 5, 50, { align: 'center', width: 242 });
       
-      // QR Code - links to actual discount URL
-      const qrCodeUrl = `https://gounded-drops.myshopify.com/discount/${code}`;
+      // QR Code - links to checkout with discount auto-applied
+      const qrCodeUrl = `https://gounded-drops.myshopify.com/cart?discount=${code}`;
       const qrCodeData = await QRCode.toDataURL(qrCodeUrl, {
         width: 80,
         margin: 1,

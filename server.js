@@ -1,1026 +1,243 @@
-require('dotenv').config();
-const express = require('express');
-const { MongoClient } = require('mongodb');
-const QRCode = require('qrcode');
-const PDFDocument = require('pdfkit');
-const crypto = require('crypto');
-const cors = require('cors');
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-app.use(express.static('public'));
-
-// Database connection
-let db;
-MongoClient.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/grounded-labels')
-  .then(client => {
-    console.log('✅ Connected to MongoDB');
-    db = client.db();
-  })
-  .catch(err => console.error('❌ MongoDB connection error:', err));
-
-// Shopify API Configuration
-const SHOPIFY_DOMAIN = process.env.SHOPIFY_DOMAIN || 'grounded-drops.myshopify.com';
-const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ACCESS_TOKEN;
-
-// Serve the main app
-app.get('/', (req, res) => {
-  res.send(`
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🍃 Grounded Drops - Label Printer</title>
+    <title>Grounded Drops Label Editor</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2d5016 0%, #4a7c59 100%);
-            min-height: 100vh;
+            font-family: Arial, sans-serif;
+            background-color: #2d2d2d;
+            color: #fff;
             padding: 20px;
+            margin: 0;
         }
         
         .container {
-            max-width: 500px;
+            max-width: 800px;
             margin: 0 auto;
-            background: white;
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
         }
         
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-        }
-        
-        .header h1 {
-            color: #2d5016;
-            font-size: 28px;
-            margin-bottom: 10px;
-        }
-        
-        .header p {
-            color: #666;
-            font-size: 16px;
-        }
-        
-        .shopify-status {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
-            padding: 10px;
+        .editor-section {
+            background-color: #3d3d3d;
+            padding: 20px;
             border-radius: 8px;
             margin-bottom: 20px;
-            text-align: center;
-            font-size: 12px;
-        }
-        
-        .form-group {
-            margin-bottom: 25px;
-        }
-        
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #333;
-        }
-        
-        .radio-group {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 15px;
-        }
-        
-        .radio-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .radio-option input[type="radio"] {
-            width: 20px;
-            height: 20px;
         }
         
         .input-group {
+            margin-bottom: 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #555;
+            background-color: #1d1d1d;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 16px;
+        }
+        
+        .label-preview {
+            background-color: #fff;
+            color: #000;
+            width: 300px;
+            height: 300px;
+            margin: 20px auto;
+            border-radius: 8px;
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 10px;
-        }
-        
-        .input-group input {
-            flex: 1;
-            padding: 12px;
-            border: 2px solid #e0e0e0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s;
-        }
-        
-        .input-group input:focus {
-            outline: none;
-            border-color: #4a7c59;
-        }
-        
-        .unit {
-            font-weight: 600;
-            color: #666;
-            min-width: 60px;
-        }
-        
-        .quick-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-        
-        .quick-btn {
-            padding: 15px;
-            border: 2px solid #e0e0e0;
-            border-radius: 12px;
-            background: #f8f9fa;
-            cursor: pointer;
+            justify-content: center;
             text-align: center;
-            transition: all 0.3s;
-            font-weight: 600;
-        }
-        
-        .quick-btn:hover {
-            border-color: #4a7c59;
-            background: #f0f8f4;
-            transform: translateY(-2px);
-        }
-        
-        .quick-btn.selected {
-            border-color: #4a7c59;
-            background: #4a7c59;
-            color: white;
-        }
-        
-        .print-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-        }
-        
-        .btn {
-            padding: 15px 25px;
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }
-        
-        .btn-primary {
-            background: #4a7c59;
-            color: white;
-        }
-        
-        .btn-primary:hover {
-            background: #3d6b4a;
-            transform: translateY(-2px);
-            box-shadow: 0 10px 20px rgba(74, 124, 89, 0.3);
-        }
-        
-        .btn-secondary {
-            background: #f8f9fa;
-            color: #333;
-            border: 2px solid #e0e0e0;
-        }
-        
-        .btn-secondary:hover {
-            background: #e9ecef;
-            transform: translateY(-2px);
-        }
-        
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none !important;
-        }
-        
-        .status {
-            margin-top: 20px;
-            padding: 15px;
-            border-radius: 8px;
-            text-align: center;
-            font-weight: 600;
-            display: none;
-        }
-        
-        .status.success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        
-        .status.error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        
-        .stats {
-            margin-top: 30px;
             padding: 20px;
-            background: #f8f9fa;
-            border-radius: 12px;
-            text-align: center;
+            box-sizing: border-box;
         }
         
-        .stats h3 {
-            color: #2d5016;
+        .label-header {
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: normal;
+            max-width: 100%;
+            word-wrap: break-word;
+        }
+        
+        .label-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .label-discount {
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .label-subtitle {
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        
+        .qr-placeholder {
+            width: 150px;
+            height: 150px;
+            background-color: #000;
+            background-image: 
+                repeating-linear-gradient(45deg, transparent, transparent 3px, #fff 3px, #fff 6px),
+                repeating-linear-gradient(-45deg, transparent, transparent 3px, #fff 3px, #fff 6px);
             margin-bottom: 10px;
         }
         
-        .stats-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 15px;
-            margin-top: 15px;
-        }
-        
-        .stat-item {
-            text-align: center;
-        }
-        
-        .stat-number {
-            font-size: 24px;
+        .label-code {
+            font-size: 10px;
             font-weight: bold;
-            color: #4a7c59;
         }
         
-        .stat-label {
-            font-size: 12px;
-            color: #666;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+        .buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+        
+        button:hover {
+            background-color: #0056b3;
+        }
+        
+        .print-button {
+            background-color: #28a745;
+        }
+        
+        .print-button:hover {
+            background-color: #218838;
+        }
+        
+        .info-text {
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="header">
-            <h1>🍃 Grounded Drops</h1>
-            <p>Shopify-Connected Label Printer</p>
-        </div>
+        <h1>Grounded Drops Label Editor</h1>
         
-        <div class="shopify-status">
-            ✅ Connected to Shopify • Creates REAL discount codes
-        </div>
-        
-        <div class="quick-buttons">
-            <div class="quick-btn" onclick="setQuickDiscount('percentage', 15, 30)">
-                <div>15% OFF</div>
-                <small>30 days</small>
-            </div>
-            <div class="quick-btn" onclick="setQuickDiscount('dollar', 5, 30)">
-                <div>$5 OFF</div>
-                <small>30 days</small>
-            </div>
-            <div class="quick-btn" onclick="setQuickDiscount('percentage', 20, 14)">
-                <div>20% OFF</div>
-                <small>14 days</small>
-            </div>
-            <div class="quick-btn" onclick="setQuickDiscount('dollar', 10, 30)">
-                <div>$10 OFF</div>
-                <small>30 days</small>
-            </div>
-        </div>
-        
-        <form id="labelForm">
-            <div class="form-group">
-                <label>Discount Type:</label>
-                <div class="radio-group">
-                    <div class="radio-option">
-                        <input type="radio" id="percentage" name="discountType" value="percentage" checked>
-                        <label for="percentage">Percentage (%)</label>
-                    </div>
-                    <div class="radio-option">
-                        <input type="radio" id="dollar" name="discountType" value="dollar">
-                        <label for="dollar">Dollar Amount ($)</label>
-                    </div>
-                </div>
+        <div class="editor-section">
+            <h2>Customize Your Label</h2>
+            
+            <div class="input-group">
+                <label for="headerText">Header Text (appears above discount):</label>
+                <input 
+                    type="text" 
+                    id="headerText" 
+                    placeholder="Enter custom header text..."
+                    value="Here is your code for your next order"
+                    maxlength="50"
+                >
             </div>
             
-            <div class="form-group">
-                <label>Discount Value:</label>
-                <div class="input-group">
-                    <input type="number" id="discountValue" min="1" max="100" value="15" required>
-                    <span class="unit" id="discountUnit">%</span>
-                </div>
+            <div class="input-group">
+                <label for="discountCode">Discount Code:</label>
+                <input 
+                    type="text" 
+                    id="discountCode" 
+                    value="GDmdxxmf3zdP7468"
+                    readonly
+                    style="background-color: #2d2d2d; cursor: not-allowed;"
+                >
+            </div>
+        </div>
+        
+        <div class="editor-section">
+            <h2>Label Preview</h2>
+            
+            <div class="label-preview" id="labelPreview">
+                <div class="label-header" id="previewHeader">Here is your code for your next order</div>
+                <div class="label-title">GROUNDED DROPS</div>
+                <div class="label-discount">15% OFF</div>
+                <div class="label-subtitle">NEXT ORDER</div>
+                <div class="qr-placeholder"></div>
+                <div class="label-code">GDmdxxmf3zdP7468</div>
+                <div class="label-code" style="font-size: 8px; margin-top: 5px;">Exp: 8/3/2025</div>
             </div>
             
-            <div class="form-group">
-                <label>Expires In:</label>
-                <div class="input-group">
-                    <input type="number" id="expiryDays" min="1" max="365" value="30" required>
-                    <span class="unit">days</span>
-                </div>
+            <div class="buttons">
+                <button onclick="resetText()">Reset to Default</button>
+                <button class="print-button" onclick="printLabel()">Print Label</button>
             </div>
             
-            <div class="print-buttons">
-                <button type="button" class="btn btn-secondary" onclick="previewLabel()">
-                    👁️ Preview
-                </button>
-                <button type="button" class="btn btn-primary" onclick="printLabel()">
-                    🖨️ Print Label
-                </button>
-            </div>
-        </form>
-        
-        <div id="status" class="status"></div>
-        
-        <div class="stats">
-            <h3>Today's Stats</h3>
-            <div class="stats-grid">
-                <div class="stat-item">
-                    <div class="stat-number" id="todayLabels">0</div>
-                    <div class="stat-label">Labels Printed</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-number" id="totalLabels">0</div>
-                    <div class="stat-label">Total Labels</div>
-                </div>
+            <div class="info-text">
+                The header text will appear at the top of your printed label.
             </div>
         </div>
     </div>
     
     <script>
-        // Update discount unit when type changes
-        document.querySelectorAll('input[name="discountType"]').forEach(radio => {
-            radio.addEventListener('change', function() {
-                const unit = document.getElementById('discountUnit');
-                unit.textContent = this.value === 'percentage' ? '%' : '$';
-                
-                // Update input max value
-                const input = document.getElementById('discountValue');
-                if (this.value === 'percentage') {
-                    input.max = 100;
-                    if (input.value > 100) input.value = 50;
-                } else {
-                    input.max = 1000;
-                }
-            });
+        const headerInput = document.getElementById('headerText');
+        const previewHeader = document.getElementById('previewHeader');
+        
+        // Update preview as user types
+        headerInput.addEventListener('input', function() {
+            previewHeader.textContent = this.value || 'Enter text above...';
         });
         
-        // Quick discount buttons
-        function setQuickDiscount(type, value, days) {
-            // Clear previous selection
-            document.querySelectorAll('.quick-btn').forEach(btn => btn.classList.remove('selected'));
-            event.target.closest('.quick-btn').classList.add('selected');
-            
-            // Set form values
-            document.querySelector(\`input[value="\${type}"]\`).checked = true;
-            document.getElementById('discountValue').value = value;
-            document.getElementById('expiryDays').value = days;
-            
-            // Update unit display
-            const unit = document.getElementById('discountUnit');
-            unit.textContent = type === 'percentage' ? '%' : '$';
+        // Reset to default text
+        function resetText() {
+            headerInput.value = 'Here is your code for your next order';
+            previewHeader.textContent = 'Here is your code for your next order';
         }
         
-        // Show status message
-        function showStatus(message, type = 'success') {
-            const status = document.getElementById('status');
-            status.textContent = message;
-            status.className = \`status \${type}\`;
-            status.style.display = 'block';
-            
-            setTimeout(() => {
-                status.style.display = 'none';
-            }, 5000);
+        // Print label function
+        function printLabel() {
+            window.print();
         }
         
-        // Preview label
-        async function previewLabel() {
-            const formData = getFormData();
-            
-            try {
-                const response = await fetch('/api/preview', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
-                });
-                
-                if (response.ok) {
-                    const blob = await response.blob();
-                    const url = URL.createObjectURL(blob);
-                    window.open(url, '_blank');
-                } else {
-                    showStatus('Error generating preview', 'error');
+        // Print styles
+        const printStyles = document.createElement('style');
+        printStyles.textContent = `
+            @media print {
+                body {
+                    background-color: white;
+                    color: black;
                 }
-            } catch (error) {
-                showStatus('Error generating preview', 'error');
-            }
-        }
-        
-        // Print label
-        async function printLabel() {
-            const formData = getFormData();
-            
-            try {
-                const response = await fetch('/api/print', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(formData)
-                });
                 
-                const result = await response.json();
-                
-                if (response.ok) {
-                    // Show success message
-                    showStatus(\`Label created! Code: \${result.code} - This discount code is now LIVE in your Shopify store!\`, 'success');
-                    updateStats();
-                    
-                    // Open PDF in new tab for printing
-                    setTimeout(async () => {
-                        try {
-                            const pdfResponse = await fetch('/api/print-pdf', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    ...formData,
-                                    code: result.code
-                                })
-                            });
-                            
-                            if (pdfResponse.ok) {
-                                const blob = await pdfResponse.blob();
-                                const url = URL.createObjectURL(blob);
-                                window.open(url, '_blank');
-                            }
-                        } catch (error) {
-                            console.error('Error opening PDF:', error);
-                        }
-                    }, 1000);
-                } else {
-                    showStatus(result.error || 'Error printing label', 'error');
+                .container > h1,
+                .editor-section:first-of-type,
+                .editor-section h2,
+                .buttons,
+                .info-text {
+                    display: none;
                 }
-            } catch (error) {
-                showStatus('Error printing label', 'error');
-            }
-        }
-        
-        // Get form data
-        function getFormData() {
-            return {
-                discountType: document.querySelector('input[name="discountType"]:checked').value,
-                discountValue: parseInt(document.getElementById('discountValue').value),
-                expiryDays: parseInt(document.getElementById('expiryDays').value)
-            };
-        }
-        
-        // Update statistics
-        async function updateStats() {
-            try {
-                const response = await fetch('/api/stats');
-                const stats = await response.json();
                 
-                document.getElementById('todayLabels').textContent = stats.today;
-                document.getElementById('totalLabels').textContent = stats.total;
-            } catch (error) {
-                console.error('Error updating stats:', error);
+                .label-preview {
+                    margin: 0;
+                    box-shadow: none;
+                    border: 1px solid #000;
+                }
             }
-        }
-        
-        // Load stats on page load
-        updateStats();
-        
-        // Auto-refresh stats every 30 seconds
-        setInterval(updateStats, 30000);
+        `;
+        document.head.appendChild(printStyles);
     </script>
 </body>
 </html>
-  `);
-});
-
-// API: Preview label
-app.post('/api/preview', async (req, res) => {
-  try {
-    const { discountType, discountValue, expiryDays } = req.body;
-    
-    // Generate preview code
-    const previewCode = 'GD-PREVIEW-SAMPLE';
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + expiryDays);
-    
-    // Create PDF
-    const pdfBuffer = await createLabelPDF({
-      code: previewCode,
-      discountType,
-      discountValue,
-      expiryDate,
-      isPreview: true
-    });
-    
-    res.contentType('application/pdf');
-    res.send(pdfBuffer);
-  } catch (error) {
-    console.error('Preview error:', error);
-    res.status(500).json({ error: 'Failed to generate preview' });
-  }
-});
-
-// API: Print label with REAL Shopify integration
-app.post('/api/print', async (req, res) => {
-  try {
-    const { discountType, discountValue, expiryDays } = req.body;
-    
-    // Generate unique code
-    const code = generateUniqueCode();
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + expiryDays);
-    
-    console.log(`Creating Shopify discount code: ${code}`);
-    
-    // Create REAL discount code in Shopify
-    const shopifyDiscountData = await createShopifyDiscountCode({
-      code,
-      discountType,
-      discountValue,
-      expiryDate
-    });
-    
-    // Create PDF
-    const pdfBuffer = await createLabelPDF({
-      code,
-      discountType,
-      discountValue,
-      expiryDate
-    });
-    
-    // Save to database (with better error handling)
-    if (db && db.collection) {
-      try {
-        await db.collection('labels').insertOne({
-          code,
-          discountType,
-          discountValue,
-          expiryDate,
-          createdAt: new Date(),
-          used: false,
-          shopifyData: shopifyDiscountData
-        });
-        console.log(`✅ Saved to database: ${code}`);
-      } catch (dbError) {
-        console.error('⚠️ Database save failed (continuing anyway):', dbError.message);
-        // Continue even if database save fails
-      }
-    } else {
-      console.warn('⚠️ Database not available, skipping save');
-    }
-    
-    console.log(`✅ Successfully created Shopify discount: ${code}`);
-    
-    res.json({ 
-      success: true, 
-      code,
-      message: `Label generated! Discount code ${code} is now LIVE in your Shopify store.`,
-      shopifyCreated: true
-    });
-  } catch (error) {
-    console.error('Print error:', error);
-    res.status(500).json({ error: `Failed to print label: ${error.message}` });
-  }
-});
-
-// Create discount code in Shopify using GraphQL API (more reliable)
-async function createShopifyDiscountCode({ code, discountType, discountValue, expiryDate }) {
-  try {
-    console.log(`🔧 Creating Shopify discount: ${code}`);
-    
-    // Check if we have access token
-    if (!SHOPIFY_ACCESS_TOKEN) {
-      throw new Error('Shopify access token not configured');
-    }
-    
-    // Create discount using GraphQL API (more modern and reliable)
-    const mutation = `
-      mutation discountCodeBasicCreate($basicCodeDiscount: DiscountCodeBasicInput!) {
-        discountCodeBasicCreate(basicCodeDiscount: $basicCodeDiscount) {
-          codeDiscountNode {
-            id
-            codeDiscount {
-              ... on DiscountCodeBasic {
-                title
-                codes(first: 10) {
-                  nodes {
-                    code
-                  }
-                }
-                startsAt
-                endsAt
-                customerSelection {
-                  ... on DiscountCustomerAll {
-                    allCustomers
-                  }
-                }
-                customerGets {
-                  value {
-                    ... on DiscountPercentage {
-                      percentage
-                    }
-                    ... on DiscountAmount {
-                      amount {
-                        amount
-                        currencyCode
-                      }
-                    }
-                  }
-                  items {
-                    ... on DiscountProducts {
-                      products(first: 10) {
-                        nodes {
-                          id
-                        }
-                      }
-                    }
-                    ... on DiscountCollections {
-                      collections(first: 10) {
-                        nodes {
-                          id
-                        }
-                      }
-                    }
-                  }
-                }
-                minimumRequirement {
-                  ... on DiscountMinimumSubtotal {
-                    greaterThanOrEqualToSubtotal {
-                      amount
-                      currencyCode
-                    }
-                  }
-                }
-                usageLimit
-              }
-            }
-          }
-          userErrors {
-            field
-            code
-            message
-          }
-        }
-      }
-    `;
-    
-    const variables = {
-      basicCodeDiscount: {
-        title: `Package Insert ${code}`,
-        code: code,
-        startsAt: new Date().toISOString(),
-        endsAt: expiryDate.toISOString(),
-        customerSelection: {
-          all: true
-        },
-        customerGets: {
-          value: discountType === 'percentage' 
-            ? { percentage: discountValue / 100 }
-            : { 
-                discountAmount: {
-                  amount: discountValue,
-                  appliesOnEachItem: false
-                }
-              },
-          items: {
-            all: true
-          }
-        },
-        usageLimit: 1
-      }
-    };
-    
-    console.log('🔄 Sending GraphQL mutation...');
-    
-    const response = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/graphql.json`, {
-      method: 'POST',
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        query: mutation,
-        variables: variables
-      })
-    });
-    
-    const responseText = await response.text();
-    console.log(`📥 GraphQL response (${response.status}):`, responseText);
-    
-    if (!response.ok) {
-      throw new Error(`GraphQL request failed: ${response.status} - ${responseText}`);
-    }
-    
-    const result = JSON.parse(responseText);
-    
-    if (result.errors) {
-      throw new Error(`GraphQL errors: ${JSON.stringify(result.errors)}`);
-    }
-    
-    if (result.data.discountCodeBasicCreate.userErrors.length > 0) {
-      throw new Error(`Discount creation errors: ${JSON.stringify(result.data.discountCodeBasicCreate.userErrors)}`);
-    }
-    
-    const discountNode = result.data.discountCodeBasicCreate.codeDiscountNode;
-    
-    console.log(`✅ Discount created successfully: ${code}`);
-    
-    return {
-      discountId: discountNode.id,
-      code: code,
-      graphQL: true
-    };
-    
-  } catch (error) {
-    console.error('❌ Shopify API Error:', error.message);
-    
-    // Fallback to simple REST API approach
-    console.log('🔄 Trying fallback REST API approach...');
-    return await createShopifyDiscountCodeFallback({ code, discountType, discountValue, expiryDate });
-  }
-}
-
-// Fallback REST API approach (simpler)
-async function createShopifyDiscountCodeFallback({ code, discountType, discountValue, expiryDate }) {
-  try {
-    // Simple approach: just try to create price rule with minimal data
-    const priceRuleData = {
-      price_rule: {
-        title: code,
-        target_type: 'line_item',
-        target_selection: 'all',
-        allocation_method: 'across',
-        value_type: discountType === 'percentage' ? 'percentage' : 'fixed_amount',
-        value: discountType === 'percentage' ? `-${discountValue}` : `-${discountValue}.00`,
-        customer_selection: 'all',
-        starts_at: new Date().toISOString(),
-        ends_at: expiryDate.toISOString(),
-        usage_limit: 1
-      }
-    };
-    
-    console.log('🔄 Trying REST API fallback...');
-    
-    const priceRuleResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules.json`, {
-      method: 'POST',
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(priceRuleData)
-    });
-    
-    const priceRuleText = await priceRuleResponse.text();
-    console.log(`📥 REST response (${priceRuleResponse.status}):`, priceRuleText);
-    
-    if (!priceRuleResponse.ok) {
-      throw new Error(`REST API failed: ${priceRuleResponse.status} - ${priceRuleText}`);
-    }
-    
-    const priceRuleResult = JSON.parse(priceRuleText);
-    const priceRuleId = priceRuleResult.price_rule.id;
-    
-    // Create discount code
-    const discountCodeResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules/${priceRuleId}/discount_codes.json`, {
-      method: 'POST',
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        discount_code: { code: code }
-      })
-    });
-    
-    if (!discountCodeResponse.ok) {
-      const errorText = await discountCodeResponse.text();
-      throw new Error(`Discount code creation failed: ${discountCodeResponse.status} - ${errorText}`);
-    }
-    
-    console.log(`✅ REST API fallback successful: ${code}`);
-    
-    return {
-      priceRuleId: priceRuleId,
-      code: code,
-      fallback: true
-    };
-    
-  } catch (error) {
-    console.error('❌ Fallback also failed:', error.message);
-    throw new Error(`Both GraphQL and REST API failed. Please check your Shopify app permissions and access token. Last error: ${error.message}`);
-  }
-}
-
-// API: Generate PDF for printing (separate from discount creation)
-app.post('/api/print-pdf', async (req, res) => {
-  try {
-    const { discountType, discountValue, expiryDays, code } = req.body;
-    
-    const expiryDate = new Date();
-    expiryDate.setDate(expiryDate.getDate() + expiryDays);
-    
-    // Create PDF with the provided code
-    const pdfBuffer = await createLabelPDF({
-      code,
-      discountType,
-      discountValue,
-      expiryDate
-    });
-    
-    res.contentType('application/pdf');
-    res.send(pdfBuffer);
-  } catch (error) {
-    console.error('PDF generation error:', error);
-    res.status(500).json({ error: 'Failed to generate PDF for printing' });
-  }
-});
-
-// API: Test Shopify connection
-app.get('/api/test-shopify', async (req, res) => {
-  try {
-    console.log('🔍 Testing Shopify connection...');
-    console.log(`📍 Domain: ${SHOPIFY_DOMAIN}`);
-    console.log(`🔑 Token: ${SHOPIFY_ACCESS_TOKEN ? 'Present' : 'Missing'}`);
-    
-    // Test 1: Try to get shop info
-    const shopResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/shop.json`, {
-      method: 'GET',
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    const shopText = await shopResponse.text();
-    console.log(`📥 Shop response (${shopResponse.status}):`, shopText);
-    
-    if (!shopResponse.ok) {
-      return res.json({
-        success: false,
-        error: `Shop API failed: ${shopResponse.status} - ${shopText}`,
-        domain: SHOPIFY_DOMAIN,
-        tokenPresent: !!SHOPIFY_ACCESS_TOKEN
-      });
-    }
-    
-    const shopData = JSON.parse(shopText);
-    
-    // Test 2: Try to list existing price rules
-    const priceRulesResponse = await fetch(`https://${SHOPIFY_DOMAIN}/admin/api/2024-01/price_rules.json?limit=1`, {
-      method: 'GET',
-      headers: {
-        'X-Shopify-Access-Token': SHOPIFY_ACCESS_TOKEN,
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    const priceRulesText = await priceRulesResponse.text();
-    console.log(`📥 Price rules response (${priceRulesResponse.status}):`, priceRulesText);
-    
-    res.json({
-      success: true,
-      shopName: shopData.shop.name,
-      shopDomain: shopData.shop.domain,
-      configuredDomain: SHOPIFY_DOMAIN,
-      priceRulesAccess: priceRulesResponse.ok,
-      priceRulesStatus: priceRulesResponse.status,
-      message: 'Shopify connection test completed'
-    });
-    
-  } catch (error) {
-    console.error('❌ Shopify test error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      domain: SHOPIFY_DOMAIN,
-      tokenPresent: !!SHOPIFY_ACCESS_TOKEN
-    });
-  }
-});
-app.get('/api/stats', async (req, res) => {
-  try {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    const todayLabels = await db.collection('labels').countDocuments({
-      createdAt: { $gte: today }
-    });
-    
-    const totalLabels = await db.collection('labels').countDocuments();
-    
-    res.json({
-      today: todayLabels,
-      total: totalLabels
-    });
-  } catch (error) {
-    console.error('Stats error:', error);
-    res.json({ today: 0, total: 0 });
-  }
-});
-
-// Generate unique code
-function generateUniqueCode() {
-  const timestamp = Date.now().toString(36);
-  const random = crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `GD${timestamp}${random}`;
-}
-
-// Create label PDF
-async function createLabelPDF({ code, discountType, discountValue, expiryDate, isPreview = false }) {
-  return new Promise(async (resolve, reject) => {
-    try {
-      const doc = new PDFDocument({ 
-        size: [252, 180], // 3.5" x 2.5" at 72 DPI
-        margin: 5,
-        layout: 'portrait'
-      });
-      
-      const buffers = [];
-      doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfBuffer = Buffer.concat(buffers);
-        resolve(pdfBuffer);
-      });
-      
-      // Header
-      doc.fontSize(12)
-         .font('Helvetica-Bold')
-         .text('☕ GROUNDED DROPS', 5, 10, { align: 'center', width: 242 });
-      
-      // Discount offer
-      const discountText = discountType === 'percentage' 
-        ? `${discountValue}% OFF`
-        : `$${discountValue} OFF`;
-      
-      doc.fontSize(18)
-         .font('Helvetica-Bold')
-         .text(`🎁 ${discountText}`, 5, 30, { align: 'center', width: 242 });
-      
-      doc.fontSize(9)
-         .font('Helvetica')
-         .text('NEXT ORDER', 5, 50, { align: 'center', width: 242 });
-      
-      // QR Code - links to checkout with discount auto-applied
-      const qrCodeUrl = `https://gounded-drops.myshopify.com/cart?discount=${code}`;
-      const qrCodeData = await QRCode.toDataURL(qrCodeUrl, {
-        width: 80,
-        margin: 1,
-        color: {
-          dark: '#000000',
-          light: '#FFFFFF'
-        }
-      });
-      const qrCodeBuffer = Buffer.from(qrCodeData.split(',')[1], 'base64');
-      
-      doc.image(qrCodeBuffer, 86, 70, { width: 80, height: 80 });
-      
-      // Code
-      doc.fontSize(7)
-         .font('Helvetica-Bold')
-         .text(isPreview ? 'PREVIEW-CODE' : code, 5, 155, { align: 'center', width: 242 });
-      
-      // Expiry
-      doc.fontSize(6)
-         .font('Helvetica')
-         .text(`Exp: ${expiryDate.toLocaleDateString()}`, 5, 167, { align: 'center', width: 242 });
-      
-      doc.end();
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    message: 'Grounded Drops Label Printer is running!',
-    shopifyConnected: !!SHOPIFY_ACCESS_TOKEN,
-    shopifyDomain: SHOPIFY_DOMAIN
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🍃 Grounded Drops Label Printer running on port ${PORT}`);
-  console.log(`🖨️ Ready to print discount labels!`);
-  console.log(`🏪 Shopify connected: ${!!SHOPIFY_ACCESS_TOKEN}`);
-  console.log(`🌐 Store: ${SHOPIFY_DOMAIN}`);
-});

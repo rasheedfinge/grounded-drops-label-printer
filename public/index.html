@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Edit your order</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap">
+      <span class="brand" id="brand">Order editor</span>
+      <span class="tagline">Need to make a quick change?</span>
+    </div>
+  </header>
+
+  <main class="wrap" id="main">
+    <!-- Lookup -->
+    <section class="card lookup" id="lookupCard">
+      <h1>Edit your order</h1>
+      <p class="muted">Hasn't shipped yet? Fix your address, change an item, or add something — no need to email us.</p>
+      <form id="lookupForm" autocomplete="on">
+        <label>
+          Order number
+          <input type="text" id="orderNumber" name="orderNumber" placeholder="e.g. GD#99128665" required />
+        </label>
+        <label>
+          Email used at checkout
+          <input type="email" id="email" name="email" placeholder="you@example.com" required />
+        </label>
+        <button type="submit" class="btn primary" id="lookupBtn">Find my order</button>
+      </form>
+    </section>
+
+    <!-- Order -->
+    <section id="orderView" hidden>
+      <div class="card" id="statusCard"></div>
+
+      <div class="card" id="summaryCard"></div>
+
+      <div class="card" id="addressCard" hidden>
+        <h2>Shipping address</h2>
+        <form id="addressForm" class="grid">
+          <label>First name<input id="a_firstName" required /></label>
+          <label>Last name<input id="a_lastName" required /></label>
+          <label class="full">Address<input id="a_address1" required /></label>
+          <label class="full">Apartment, suite, etc. (optional)<input id="a_address2" /></label>
+          <label>City<input id="a_city" required /></label>
+          <label>State / Province<input id="a_province" /></label>
+          <label>Postcode<input id="a_zip" /></label>
+          <label>Country<input id="a_country" required /></label>
+          <label class="full">Phone (optional)<input id="a_phone" /></label>
+          <div class="full actions">
+            <button type="submit" class="btn primary" id="addressBtn">Save address</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" id="swapCard" hidden>
+        <h2>Change an item</h2>
+        <p class="muted">Picked the wrong size or grind? Switch it below.</p>
+        <div id="swapList"></div>
+      </div>
+
+      <div class="card" id="upsellCard" hidden>
+        <h2 id="upsellHeading">Add to your order</h2>
+        <p class="muted" id="upsellSubheading"></p>
+        <div id="upsellGrid" class="offers"></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <footer class="site-footer">
+    <div class="wrap muted small">Changes are applied to your order instantly. Questions? Just reply to your order email.</div>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

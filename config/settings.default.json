@@ -1,0 +1,19 @@
+{
+  "editWindowMinutes": 60,
+  "allowAddressEdit": true,
+  "allowVariantSwap": true,
+  "allowUpsell": true,
+  "allowPricedSwaps": false,
+  "swapPriceTolerance": 0,
+  "upsellDiscountPercent": 15,
+  "upsellHeading": "Add to your order before it ships",
+  "upsellSubheading": "It hasn't left the roastery yet — add a little extra and we'll pack it together. We'll email you a secure link to pay the difference.",
+  "upsellVariantIds": [
+    "gid://shopify/ProductVariant/40657871339578",
+    "gid://shopify/ProductVariant/39521186349114",
+    "gid://shopify/ProductVariant/39396477206586"
+  ],
+  "excludeProductTags": ["Subscription"],
+  "notifyCustomerOnEdit": true,
+  "invoiceForBalance": true
+}

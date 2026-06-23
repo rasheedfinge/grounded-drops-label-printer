@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex" />
+  <title>Order editor — settings</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+    .row:first-child { border-top: none; }
+    .row .desc { color: var(--muted); font-size: 13px; }
+    .switch input { width: auto; margin: 0; transform: scale(1.3); }
+    .inline { display: flex; gap: 12px; flex-wrap: wrap; }
+    .inline label { flex: 1; min-width: 160px; }
+    .chip { display: inline-flex; align-items: center; gap: 8px; background: var(--cream); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; margin: 4px 6px 0 0; font-size: 13px; }
+    .chip button { border: none; background: none; color: var(--err); cursor: pointer; font-size: 16px; line-height: 1; }
+    .results { margin-top: 10px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+    .presult { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
+    .presult:first-child { border-top: none; }
+    .presult img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--cream); }
+    .vbtn { font-size: 12px; padding: 4px 8px; }
+    code { background: var(--cream); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header class="site-header"><div class="wrap"><span class="brand">Order editor — settings</span><span class="tagline" id="shopName"></span></div></header>
+
+  <main class="wrap" style="padding:28px 20px 60px">
+    <div class="card">
+      <h2>What can customers do?</h2>
+      <div class="row switch"><div><strong>Fix shipping address</strong><div class="desc">Let customers correct their delivery address.</div></div><input type="checkbox" id="allowAddressEdit" /></div>
+      <div class="row switch"><div><strong>Swap items / change variant</strong><div class="desc">Switch size, grind, or another option of the same product.</div></div><input type="checkbox" id="allowVariantSwap" /></div>
+      <div class="row switch"><div><strong>Add items / upsell</strong><div class="desc">Offer the curated products below as post-purchase add-ons.</div></div><input type="checkbox" id="allowUpsell" /></div>
+    </div>
+
+    <div class="card">
+      <h2>Rules</h2>
+      <div class="inline">
+        <label>Edit window (minutes)<input type="number" id="editWindowMinutes" min="0" /></label>
+        <label>Upsell discount (%)<input type="number" id="upsellDiscountPercent" min="0" max="100" /></label>
+        <label>Swap price tolerance ($)<input type="number" id="swapPriceTolerance" min="0" step="0.01" /></label>
+      </div>
+      <div class="row switch" style="margin-top:8px"><div><strong>Allow swaps to pricier options</strong><div class="desc">If off, customers can only switch to an equal or cheaper option.</div></div><input type="checkbox" id="allowPricedSwaps" /></div>
+      <div class="row switch"><div><strong>Email customer when an edit is made</strong><div class="desc">Sends Shopify's order-updated email after address/swap changes.</div></div><input type="checkbox" id="notifyCustomerOnEdit" /></div>
+      <div class="row switch"><div><strong>Email a pay link for added items</strong><div class="desc">When an upsell adds a balance, email a secure Shopify payment link.</div></div><input type="checkbox" id="invoiceForBalance" /></div>
+      <label style="margin-top:14px">Exclude products with these tags from swaps (comma separated)<input id="excludeProductTags" placeholder="Subscription" /></label>
+    </div>
+
+    <div class="card">
+      <h2>Upsell offers</h2>
+      <p class="muted">These products are offered as add-ons. Search to add, click ✕ to remove.</p>
+      <div id="upsellChips"></div>
+      <label style="margin-top:14px">Heading<input id="upsellHeading" /></label>
+      <label>Subheading<input id="upsellSubheading" /></label>
+      <hr style="border:none;border-top:1px solid var(--line);margin:16px 0" />
+      <label>Search products<input id="productSearch" placeholder="e.g. mug, sample box" /></label>
+      <div class="results" id="searchResults" hidden></div>
+    </div>
+
+    <div class="card">
+      <button class="btn primary" id="saveBtn">Save settings</button>
+    </div>
+
+    <div class="card">
+      <h2>Generate an edit link</h2>
+      <p class="muted">Build a signed link to paste into your order-confirmation email or order-status page. Each customer gets their own.</p>
+      <div class="inline">
+        <label>Order number<input id="linkOrder" placeholder="GD#99128665" /></label>
+        <label>Customer email<input id="linkEmail" placeholder="customer@example.com" /></label>
+      </div>
+      <button class="btn ghost" id="linkBtn" style="margin-top:6px">Generate link</button>
+      <p id="linkOut" style="margin-top:12px"></p>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/admin.js"></script>
+</body>
+</html>

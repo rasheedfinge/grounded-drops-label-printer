@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grounded Drops — Giveaway Admin</title>
+  <style>
+    :root { --bg:#10100f; --card:#1c1b19; --line:#2e2c29; --accent:#7cb342; --accent-d:#5a9024; --text:#f4f1ea; --muted:#a39e94; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:1000px; margin:0 auto; padding:28px 20px 64px; }
+    h1 { font-size:22px; margin:0 0 20px; }
+    h2 { font-size:16px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+    .grid { display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; }
+    input, textarea { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:#141312; color:var(--text); font-size:14px; }
+    textarea { resize:vertical; min-height:60px; }
+    button { padding:10px 14px; border:none; border-radius:8px; background:var(--accent); color:#0c1407; font-weight:700; cursor:pointer; font-size:14px; }
+    button:hover { background:var(--accent-d); }
+    button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+    button.ghost:hover { background:#222; }
+    .full { width:100%; margin-top:16px; }
+    .gv-item { padding:12px; border:1px solid var(--line); border-radius:9px; margin-bottom:10px; cursor:pointer; }
+    .gv-item:hover { border-color:var(--accent); }
+    .gv-item.active { border-color:var(--accent); background:#181d12; }
+    .gv-item .t { font-weight:600; }
+    .gv-item .meta { font-size:12px; color:var(--muted); margin-top:3px; }
+    .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; background:#222; color:var(--muted); }
+    .pill.open { background:#1d2a12; color:var(--accent); }
+    .pill.drawn { background:#2a2212; color:#e0c060; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; font-size:12px; }
+    .stat-row { display:flex; gap:24px; margin-bottom:16px; }
+    .stat .n { font-size:30px; font-weight:800; color:var(--accent); }
+    .stat .l { font-size:12px; color:var(--muted); text-transform:uppercase; }
+    .winner { background:#181d12; border:1px solid var(--accent); border-radius:10px; padding:16px; margin-bottom:16px; }
+    .winner .name { font-size:18px; font-weight:700; }
+    .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    .err { color:#ffb4b4; font-size:13px; margin-top:8px; }
+    .empty { color:var(--muted); padding:20px 0; }
+    a { color:var(--accent); }
+    @media (max-width:760px){ .grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🌱 Giveaway Admin</h1>
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>New Giveaway</h2>
+          <form id="newForm">
+            <label>Title</label>
+            <input id="title" placeholder="June Drop Giveaway" required />
+            <label>Prize</label>
+            <input id="prize" placeholder="1 free bag of Grounded Drops" />
+            <label>Period (YYYY-MM)</label>
+            <input id="period" placeholder="2026-06" />
+            <label>Description</label>
+            <textarea id="description" placeholder="Tell entrants what they could win…"></textarea>
+            <button class="full" type="submit">Create Giveaway</button>
+            <div class="err" id="newErr"></div>
+          </form>
+        </div>
+        <div class="card" style="margin-top:20px">
+          <h2>Giveaways</h2>
+          <div id="gvList"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+
+      <div class="card" id="detail">
+        <div class="empty">Select a giveaway to view entries and draw a winner.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    let selectedId = null;
+
+    async function api(url, opts) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) { location.reload(); return; }
+      const data = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
+      if (!res.ok) throw new Error((data && data.error) || 'Request failed');
+      return data;
+    }
+
+    async function loadList() {
+      const { giveaways } = await api('/api/admin/giveaways');
+      const list = el('gvList');
+      if (!giveaways.length) { list.innerHTML = '<div class="empty">No giveaways yet.</div>'; return; }
+      list.innerHTML = '';
+      for (const g of giveaways) {
+        const div = document.createElement('div');
+        div.className = 'gv-item' + (g.id === selectedId ? ' active' : '');
+        div.innerHTML = `<div class="t">${escapeHtml(g.title)} <span class="pill ${g.status}">${g.status}</span></div>
+          <div class="meta">${g.period} · ${g.participant_count} entrants · ${g.ticket_count} entries</div>`;
+        div.onclick = () => selectGiveaway(g.id);
+        list.appendChild(div);
+      }
+    }
+
+    async function selectGiveaway(id) {
+      selectedId = id;
+      await loadList();
+      const { giveaway, participants, totals, winner } = await api('/api/admin/giveaways/' + id);
+      const canDraw = giveaway.status === 'open' && totals.tickets > 0;
+      el('detail').innerHTML = `
+        <div class="toolbar">
+          <h2 style="margin:0">${escapeHtml(giveaway.title)}</h2>
+          <span class="pill ${giveaway.status}">${giveaway.status}</span>
+          <span style="flex:1"></span>
+          ${canDraw ? '<button id="drawBtn">🎲 Draw Winner</button>' : ''}
+          <a href="/api/admin/giveaways/${id}/export.csv"><button class="ghost" type="button">Export CSV</button></a>
+        </div>
+        ${winner ? `<div class="winner"><div class="l" style="color:var(--muted);font-size:12px;text-transform:uppercase">Winner</div>
+          <div class="name">${escapeHtml(winner.name || winner.email)}</div>
+          <div style="color:var(--muted);font-size:13px">${escapeHtml(winner.email)} · ${winner.tickets} entries · drawn ${winner.drawn_at}</div></div>` : ''}
+        <div class="stat-row">
+          <div class="stat"><div class="n">${totals.participants}</div><div class="l">Entrants</div></div>
+          <div class="stat"><div class="n">${totals.tickets}</div><div class="l">Total Entries</div></div>
+        </div>
+        ${participants.length ? `<table>
+          <thead><tr><th>Email</th><th>Name</th><th>Entries</th><th>Referrals</th><th>Purchases</th><th>Joined</th></tr></thead>
+          <tbody>${participants.map((p) => `<tr>
+            <td>${escapeHtml(p.email)}</td><td>${escapeHtml(p.name || '—')}</td>
+            <td><strong>${p.tickets}</strong></td><td>${p.referrals}</td><td>${p.purchases}</td>
+            <td style="color:var(--muted)">${p.created_at}</td></tr>`).join('')}</tbody>
+        </table>` : '<div class="empty">No entrants yet.</div>'}
+      `;
+      const drawBtn = el('drawBtn');
+      if (drawBtn) drawBtn.onclick = async () => {
+        if (!confirm('Draw a winner now? This closes the giveaway and cannot be undone.')) return;
+        drawBtn.disabled = true;
+        try { await api('/api/admin/giveaways/' + id + '/draw', { method: 'POST' }); await selectGiveaway(id); }
+        catch (e) { alert(e.message); drawBtn.disabled = false; }
+      };
+    }
+
+    el('newForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('newErr').textContent = '';
+      try {
+        const { giveaway } = await api('/api/admin/giveaways', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: el('title').value, prize: el('prize').value,
+            period: el('period').value, description: el('description').value,
+          }),
+        });
+        el('newForm').reset();
+        await selectGiveaway(giveaway.id);
+      } catch (e2) { el('newErr').textContent = e2.message; }
+    });
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
+    // default the period field to the current month
+    const now = new Date();
+    el('period').value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    loadList();
+  </script>
+</body>
+</html>

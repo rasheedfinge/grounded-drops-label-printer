@@ -1,0 +1,86 @@
+{% comment %}
+  Grounded Drops — Gift Offers app embed block.
+
+  This is an "app embed" block: merchants turn it on from
+  Online Store → Themes → Customize → App embeds. It injects the gift widget
+  on every storefront page. All offer rules are configured in the "Offers JSON"
+  setting below (see SETUP.md for the schema and examples).
+{% endcomment %}
+
+{% if block.settings.enabled %}
+  <script>
+    window.GroundedGiftOffers = {
+      moneyFormat: {{ shop.money_format | json }},
+      currency: {{ cart.currency.iso_code | json }},
+      sliderTitle: {{ block.settings.slider_title | json }},
+      sliderSubtitle: {{ block.settings.slider_subtitle | json }},
+      position: {{ block.settings.position | json }},
+      debug: {{ block.settings.debug | json }},
+      // Offers is a JSON array — parsed defensively in the JS.
+      offersRaw: {{ block.settings.offers_json | json }}
+    };
+  </script>
+  {{ 'gift-offers.css' | asset_url | stylesheet_tag }}
+  <script src="{{ 'gift-offers.js' | asset_url }}" defer></script>
+{% endif %}
+
+{% schema %}
+{
+  "name": "Gift Offers",
+  "target": "body",
+  "settings": [
+    {
+      "type": "checkbox",
+      "id": "enabled",
+      "label": "Enable gift offers",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Offer rules"
+    },
+    {
+      "type": "paragraph",
+      "content": "Paste your offers as a JSON array. See SETUP.md in the app repo for the full schema and examples."
+    },
+    {
+      "type": "textarea",
+      "id": "offers_json",
+      "label": "Offers JSON",
+      "default": "[]"
+    },
+    {
+      "type": "header",
+      "content": "Gift slider appearance"
+    },
+    {
+      "type": "text",
+      "id": "slider_title",
+      "label": "Slider title",
+      "default": "🎁 Pick your free gift!"
+    },
+    {
+      "type": "text",
+      "id": "slider_subtitle",
+      "label": "Slider subtitle",
+      "default": "Added free at checkout"
+    },
+    {
+      "type": "select",
+      "id": "position",
+      "label": "Slider position",
+      "options": [
+        { "value": "bottom", "label": "Bottom of screen" },
+        { "value": "top", "label": "Top of screen" }
+      ],
+      "default": "bottom"
+    },
+    {
+      "type": "checkbox",
+      "id": "debug",
+      "label": "Debug mode (logs to browser console)",
+      "default": false
+    }
+  ]
+}
+{% endschema %}

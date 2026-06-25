@@ -1,0 +1,4 @@
+# Never commit secrets or real customer data
+.env
+customers.csv
+*.real.csv

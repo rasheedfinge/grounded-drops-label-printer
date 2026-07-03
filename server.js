@@ -7,12 +7,12 @@
  * address, swap a variant, or add an upsell item to an order that hasn't
  * shipped yet. Changes are written straight to Shopify via the Admin API.
  *
- *   /            -> customer portal (enter order # + email)
- *   /edit?token= -> customer portal via a signed link
- *   /admin       -> merchant settings (password protected)
- *   /api/portal  -> customer API
- *   /api/admin   -> merchant API
- *   /healthz     -> health check
+ *   /              -> customer portal (enter order # + email)
+ *   /edit?token=   -> customer portal via a signed link
+ *   /admin         -> merchant settings (password protected, incl. its JS)
+ *   /api/portal    -> customer API
+ *   /api/admin     -> merchant API
+ *   /healthz       -> health check
  */
 
 const path = require('path');
@@ -28,6 +28,38 @@ const app = express();
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 
+// Baseline security headers. The CSP allows exactly what the two pages use:
+// same-origin scripts/styles (plus inline <style>/style=""), Shopify CDN
+// product images, and same-origin fetches. No inline event handlers exist.
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'X-Robots-Tag': 'noindex, nofollow',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Strict-Transport-Security': 'max-age=15552000; includeSubDomains',
+    'Content-Security-Policy': [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: https://cdn.shopify.com",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+    ].join('; '),
+  });
+  next();
+});
+
+// Order data and settings must never land in shared caches.
+app.use(['/api', '/admin'], (req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 app.use(express.json({ limit: '100kb' }));
 
 // Health check
@@ -37,9 +69,14 @@ app.get('/healthz', (req, res) => res.json({ ok: true }));
 app.use('/api/portal', portalRoutes);
 app.use('/api/admin', adminRoutes);
 
-// Merchant settings page (password protected)
+// Merchant settings screen. The page AND its script live outside public/ so
+// nothing admin-related is served without credentials.
+const privateDir = path.join(__dirname, 'private');
 app.get('/admin', adminRoutes.requireAuth, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+  res.sendFile(path.join(privateDir, 'admin.html'));
+});
+app.get('/admin/app.js', adminRoutes.requireAuth, (req, res) => {
+  res.sendFile(path.join(privateDir, 'admin.js'));
 });
 
 // Customer portal entry points

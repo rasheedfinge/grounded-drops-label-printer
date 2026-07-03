@@ -5,48 +5,96 @@
  *
  * Trust model:
  *   - A request is authorised either by a signed link token (possession proves
- *     ownership) or by order-number + email (verified against Shopify).
+ *     ownership) or by order-number + email (verified against Shopify). After
+ *     a successful lookup the client is handed a signed session token, so
+ *     follow-up calls don't re-run the order search.
  *   - Every mutating endpoint re-resolves the order and re-checks eligibility
  *     server-side. The browser is never trusted for permissions or pricing.
+ *   - Mutations on the same order are serialised in-process, so a double
+ *     submit (or two tabs) can't run overlapping order-edit sessions.
  */
 
 const express = require('express');
 const shopify = require('../shopify');
 const tokens = require('../tokens');
 const settingsStore = require('../settings');
-const { orderEligibility } = require('../eligibility');
+const { orderEligibility, isLineSwappable } = require('../eligibility');
 const config = require('../config');
 
 const router = express.Router();
 
 /* --------------------------------------------------------- rate limiting */
 
-const hits = new Map(); // ip -> { count, resetAt }
-
-function rateLimit(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress || 'unknown';
-  const now = Date.now();
-  const rec = hits.get(ip);
-  if (!rec || now > rec.resetAt) {
-    hits.set(ip, { count: 1, resetAt: now + config.lookupRateWindowMs });
+function makeLimiter(max, windowMs, message) {
+  const hits = new Map(); // ip -> { count, resetAt }
+  const timer = setInterval(() => {
+    const now = Date.now();
+    for (const [ip, rec] of hits) if (now > rec.resetAt) hits.delete(ip);
+  }, 5 * 60 * 1000);
+  timer.unref();
+  return function limiter(req, res, next) {
+    const ip = req.ip || 'unknown';
+    const now = Date.now();
+    const rec = hits.get(ip);
+    if (!rec || now > rec.resetAt) {
+      hits.set(ip, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    rec.count += 1;
+    if (rec.count > max) {
+      return res.status(429).json({ error: message });
+    }
     return next();
-  }
-  rec.count += 1;
-  if (rec.count > config.lookupRateLimit) {
-    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
-  }
-  return next();
+  };
 }
 
-// Opportunistically drop expired rate-limit records so the map can't grow forever.
-setInterval(() => {
-  const now = Date.now();
-  for (const [ip, rec] of hits) if (now > rec.resetAt) hits.delete(ip);
-}, 5 * 60 * 1000).unref();
+// Every portal endpoint accepts order credentials, so every endpoint gets a
+// limiter — otherwise /address et al. would be a brute-force side door around
+// the lookup limit. Lookups get a stricter budget on top.
+const apiLimiter = makeLimiter(
+  Math.max(120, config.lookupRateLimit * 4),
+  config.lookupRateWindowMs,
+  'Too many requests. Please wait a few minutes and try again.'
+);
+const lookupLimiter = makeLimiter(
+  config.lookupRateLimit,
+  config.lookupRateWindowMs,
+  'Too many attempts. Please wait a few minutes and try again.'
+);
+
+router.use(apiLimiter);
+
+/* ------------------------------------------------------ per-order locking */
+
+const orderLocks = new Map(); // orderGid -> tail promise
+
+/** Serialise mutations per order so concurrent edits can't interleave. */
+async function withOrderLock(orderGid, fn) {
+  const prev = orderLocks.get(orderGid) || Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  const tail = run.catch(() => {});
+  orderLocks.set(orderGid, tail);
+  try {
+    return await run;
+  } finally {
+    if (orderLocks.get(orderGid) === tail) orderLocks.delete(orderGid);
+  }
+}
 
 /* --------------------------------------------------------------- helpers */
 
 const str = (v, max = 255) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
+
+/** Customer-safe error text: keep Shopify's userError phrasing, hide plumbing. */
+function publicError(err, fallback) {
+  let msg = String((err && err.message) || '');
+  if (/Could not reach Shopify|non-JSON response|not configured/i.test(msg)) {
+    return 'We could not reach the store right now — please try again in a moment.';
+  }
+  msg = msg.replace(/^Shopify GraphQL error:\s*/i, '');
+  if (!msg || msg.length > 220) return fallback;
+  return msg;
+}
 
 /** Resolve + authorise an order from request credentials. Returns {gid, raw} or null. */
 async function resolveOrder(body) {
@@ -61,43 +109,39 @@ async function resolveOrder(body) {
   return raw ? { gid, raw } : null;
 }
 
-function isSwappable(li, settings) {
-  if (li.isSubscription) return false;
-  if (li.merchantEditable === false) return false;
-  if (li.productHasOnlyDefaultVariant) return false;
-  if ((li.quantity || 0) < 1) return false;
-  const exclude = (settings.excludeProductTags || []).map((t) => String(t).toLowerCase());
-  if (exclude.length && (li.productTags || []).some((t) => exclude.includes(String(t).toLowerCase()))) return false;
-  return true;
-}
-
-/** Build the resolved list of upsell offers (skips out-of-stock / already-bought). */
-async function buildUpsellOffers(settings, order) {
-  const ids = (settings.upsellVariantIds || []).slice(0, 8);
-  if (!ids.length) return [];
-  const owned = new Set((order.lineItems.edges || []).map((e) => e.node.variant && e.node.variant.id).filter(Boolean));
-  const discount = Number(settings.upsellDiscountPercent) || 0;
-  const variants = await Promise.all(
-    ids.map((id) => shopify.getVariant(id).catch(() => null))
-  );
-  const offers = [];
-  for (const v of variants) {
-    if (!v || !v.availableForSale) continue;
-    if (owned.has(v.id)) continue;
-    if (v.product && v.product.status && v.product.status !== 'ACTIVE') continue;
-    const price = Number(v.price);
-    const discounted = Math.round(price * (1 - discount / 100) * 100) / 100;
-    offers.push({
-      variantId: v.id,
-      title: v.product ? v.product.title : v.title,
-      variantTitle: v.title && v.title !== 'Default Title' ? v.title : null,
-      image: v.image ? v.image.url : null,
-      price,
-      discountedPrice: discounted,
-      discountPercent: discount,
-    });
+/** Build the resolved list of upsell offers (skips unavailable / already-bought). */
+async function buildUpsellOffers(settings, rawOrder) {
+  try {
+    const ids = (settings.upsellVariantIds || []).slice(0, 8);
+    if (!ids.length) return [];
+    const owned = new Set(
+      (rawOrder.lineItems.edges || []).map((e) => e.node.variant && e.node.variant.id).filter(Boolean)
+    );
+    const discount = Number(settings.upsellDiscountPercent) || 0;
+    const variants = await shopify.getVariantsByIds(ids);
+    const offers = [];
+    for (const v of variants) {
+      if (!v || !v.availableForSale) continue;
+      if (owned.has(v.id)) continue;
+      if (v.product && v.product.status && v.product.status !== 'ACTIVE') continue;
+      const price = Number(v.price);
+      const discounted = Math.round(price * (1 - discount / 100) * 100) / 100;
+      offers.push({
+        variantId: v.id,
+        title: v.product ? v.product.title : v.title,
+        variantTitle: v.title && v.title !== 'Default Title' ? v.title : null,
+        image: shopify.variantImage(v),
+        price,
+        discountedPrice: discounted,
+        discountPercent: discount,
+      });
+    }
+    return offers;
+  } catch (err) {
+    // Offers are a nice-to-have; never let them break the lookup.
+    console.error('[upsell-offers]', err.message);
+    return [];
   }
-  return offers;
 }
 
 function eligibilityPermissions(elig, settings) {
@@ -108,10 +152,12 @@ function eligibilityPermissions(elig, settings) {
   };
 }
 
+const fmtAmount = (n, currency) => `${currency} ${Math.abs(Number(n) || 0).toFixed(2)}`;
+
 /* ----------------------------------------------------------------- routes */
 
 // Look up an order and return everything the portal needs to render.
-router.post('/lookup', rateLimit, async (req, res) => {
+router.post('/lookup', lookupLimiter, async (req, res) => {
   try {
     const resolved = await resolveOrder(req.body);
     if (!resolved) {
@@ -120,13 +166,19 @@ router.post('/lookup', rateLimit, async (req, res) => {
     const settings = settingsStore.load();
     const elig = orderEligibility(resolved.raw, settings);
     const order = shopify.normalizeOrder(resolved.raw);
-    order.lineItems = order.lineItems.map((li) => ({ ...li, swappable: elig.editable && settings.allowVariantSwap !== false && isSwappable(li, settings) }));
+    order.lineItems = order.lineItems.map((li) => ({
+      ...li,
+      swappable: elig.editable && settings.allowVariantSwap !== false && isLineSwappable(li, settings),
+    }));
 
     const permissions = eligibilityPermissions(elig, settings);
     const upsellOffers = permissions.upsell ? await buildUpsellOffers(settings, resolved.raw) : [];
 
     return res.json({
       store: config.public,
+      // Ownership is proven, so hand back a signed token: follow-up calls
+      // skip the Shopify order search and stay within rate limits.
+      sessionToken: tokens.sign(resolved.gid),
       order,
       eligibility: { editable: elig.editable, reasons: elig.reasons, closesAt: elig.closesAt },
       permissions,
@@ -154,7 +206,7 @@ router.post('/swap-options', async (req, res) => {
     }
     const order = shopify.normalizeOrder(resolved.raw);
     const li = order.lineItems.find((x) => x.id === str(req.body.lineItemId, 100));
-    if (!li || !isSwappable(li, settings) || !li.productId) {
+    if (!li || !isLineSwappable(li, settings) || !li.productId) {
       return res.status(400).json({ error: 'That item cannot be changed.' });
     }
     const product = await shopify.getProductVariants(li.productId);
@@ -200,18 +252,28 @@ router.post('/address', async (req, res) => {
       phone: str(a.phone, 40),
       company: str(a.company, 120),
     };
+
+    // Shipping was priced for the original destination country, so
+    // self-service corrections stay within it. (If the order somehow has no
+    // address yet, accept what was submitted.)
+    const existing = resolved.raw.shippingAddress || {};
+    if (existing.country) address.country = existing.country;
+
     if (!address.firstName || !address.lastName || !address.address1 || !address.city || !address.country) {
       return res.status(400).json({ error: 'Please fill in first name, last name, address, city and country.' });
+    }
+    if (existing.zip && !address.zip) {
+      return res.status(400).json({ error: 'Please include your postcode.' });
     }
     // Drop empties so we don't overwrite good values with blanks.
     Object.keys(address).forEach((k) => { if (!address[k]) delete address[k]; });
 
-    await shopify.updateShippingAddress(resolved.gid, address);
+    await withOrderLock(resolved.gid, () => shopify.updateShippingAddress(resolved.gid, address));
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
     return res.json({ ok: true, message: 'Your shipping address has been updated.', order: fresh });
   } catch (err) {
     console.error('[address]', err.message);
-    return res.status(400).json({ error: `We couldn't update the address: ${err.message}` });
+    return res.status(400).json({ error: `We couldn't update the address: ${publicError(err, 'please double-check the details and try again.')}` });
   }
 });
 
@@ -229,7 +291,7 @@ router.post('/swap', async (req, res) => {
     const lineItemId = str(req.body.lineItemId, 100);
     const newVariantId = str(req.body.newVariantId, 100);
     const li = order.lineItems.find((x) => x.id === lineItemId);
-    if (!li || !isSwappable(li, settings)) {
+    if (!li || !isLineSwappable(li, settings)) {
       return res.status(400).json({ error: 'That item cannot be changed.' });
     }
     const newVariant = await shopify.getVariant(newVariantId);
@@ -245,19 +307,37 @@ router.post('/swap', async (req, res) => {
         return res.status(400).json({ error: 'That option costs more than your current item, so it can’t be swapped in self-service. Please contact us and we’ll help.' });
       }
     }
-    await shopify.swapVariant(resolved.gid, {
+
+    // Carry the customer's effective discount over to the replacement line —
+    // edit-added items never inherit the original order's discounts.
+    const preserveDiscountPercent = shopify.effectiveDiscountPercent(li.unitPrice, li.paidUnitPrice);
+
+    const result = await withOrderLock(resolved.gid, () => shopify.swapVariant(resolved.gid, {
       originalLineItemId: li.id,
       originalVariantId: li.variantId,
       newVariantId,
       quantity: li.quantity,
+      preserveDiscountPercent,
       notifyCustomer: settings.notifyCustomerOnEdit !== false,
       staffNote: `Self-service swap: ${li.title} ${li.variantTitle || ''} → ${newVariant.title}`.trim(),
-    });
+      invoice: settings.invoiceForBalance !== false,
+      invoiceEmail: resolved.raw.email,
+      orderName: order.name,
+    }));
+
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
-    return res.json({ ok: true, message: 'Your item has been updated.', order: fresh });
+    let message = 'Your item has been updated.';
+    if (result.outstanding > 0) {
+      message = result.invoiced
+        ? `Your item has been updated. We’ve emailed you a secure link to pay the ${fmtAmount(result.outstanding, fresh.currency)} difference.`
+        : `Your item has been updated. There’s a ${fmtAmount(result.outstanding, fresh.currency)} difference — we’ll be in touch about payment.`;
+    } else if (result.outstanding < 0) {
+      message = `Your item has been updated. We owe you ${fmtAmount(result.outstanding, fresh.currency)} — we’ll refund the difference to your original payment method.`;
+    }
+    return res.json({ ok: true, message, outstanding: result.outstanding, order: fresh });
   } catch (err) {
     console.error('[swap]', err.message);
-    return res.status(400).json({ error: `We couldn't change that item: ${err.message}` });
+    return res.status(400).json({ error: `We couldn't change that item: ${publicError(err, 'please try again or contact us.')}` });
   }
 });
 
@@ -280,23 +360,33 @@ router.post('/upsell', async (req, res) => {
     if (!variant || !variant.availableForSale) {
       return res.status(400).json({ error: 'That offer is sold out.' });
     }
-    const result = await shopify.addUpsellItem(resolved.gid, {
+
+    const willInvoice = settings.invoiceForBalance !== false;
+    const order = shopify.normalizeOrder(resolved.raw);
+    const result = await withOrderLock(resolved.gid, () => shopify.addUpsellItem(resolved.gid, {
       variantId,
       quantity,
       discountPercent: Number(settings.upsellDiscountPercent) || 0,
-      invoice: settings.invoiceForBalance !== false,
+      invoice: willInvoice,
       invoiceEmail: resolved.raw.email,
-      notifyCustomer: false, // the invoice email is the customer-facing notice
+      // The invoice email is the customer-facing notice when invoicing;
+      // otherwise fall back to Shopify's order-updated email.
+      notifyCustomer: !willInvoice && settings.notifyCustomerOnEdit !== false,
       staffNote: `Self-service upsell: +${quantity}× ${variant.title}`,
-    });
+      orderName: order.name,
+    }));
+
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
-    const message = result.invoiced
-      ? `Added! We’ve emailed you a secure link to pay the ${fresh.currency} balance — once paid, it ships with your order.`
-      : 'Added to your order!';
+    let message = 'Added to your order!';
+    if (result.invoiced) {
+      message = `Added! We’ve emailed you a secure link to pay the ${fmtAmount(result.outstanding, fresh.currency)} balance — once paid, it ships with your order.`;
+    } else if (result.outstanding > 0) {
+      message = `Added! There’s a ${fmtAmount(result.outstanding, fresh.currency)} balance — we’ll be in touch about payment.`;
+    }
     return res.json({ ok: true, message, outstanding: result.outstanding, order: fresh });
   } catch (err) {
     console.error('[upsell]', err.message);
-    return res.status(400).json({ error: `We couldn't add that item: ${err.message}` });
+    return res.status(400).json({ error: `We couldn't add that item: ${publicError(err, 'please try again or contact us.')}` });
   }
 });
 

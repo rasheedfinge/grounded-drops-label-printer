@@ -36,8 +36,20 @@ function readJson(file) {
 function envOverrides() {
   const out = {};
   const e = process.env;
-  if (e.EDIT_WINDOW_MINUTES) out.editWindowMinutes = parseInt(e.EDIT_WINDOW_MINUTES, 10);
-  if (e.UPSELL_DISCOUNT_PERCENT) out.upsellDiscountPercent = parseInt(e.UPSELL_DISCOUNT_PERCENT, 10);
+  // Numeric overrides are ignored (not zeroed) when unparseable, so a typo in
+  // a config var can't silently close the edit window.
+  const intEnv = (v) => {
+    const n = parseInt(v, 10);
+    return Number.isFinite(n) ? n : undefined;
+  };
+  if (e.EDIT_WINDOW_MINUTES !== undefined) {
+    const n = intEnv(e.EDIT_WINDOW_MINUTES);
+    if (n !== undefined) out.editWindowMinutes = n;
+  }
+  if (e.UPSELL_DISCOUNT_PERCENT !== undefined) {
+    const n = intEnv(e.UPSELL_DISCOUNT_PERCENT);
+    if (n !== undefined) out.upsellDiscountPercent = n;
+  }
   if (e.UPSELL_VARIANT_IDS) {
     out.upsellVariantIds = e.UPSELL_VARIANT_IDS.split(',').map((s) => s.trim()).filter(Boolean);
   }

@@ -68,6 +68,13 @@ input, select {
   border-radius: 10px;
 }
 input:focus, select:focus { outline: none; border-color: var(--coffee); box-shadow: 0 0 0 3px rgba(111, 78, 55, .15); }
+input.locked[readonly] { background: var(--cream); color: var(--muted); cursor: not-allowed; }
+.hint { color: var(--muted); font-size: 12px; font-weight: 400; margin: -6px 0 12px; }
+
+/* image placeholder (shown when a product has no image) */
+.imgph { display: block; background: var(--cream); border-radius: 8px; }
+.li .imgph { width: 52px; height: 52px; flex: none; }
+.offer .imgph { width: 100%; height: 130px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -115,7 +122,7 @@ input:focus, select:focus { outline: none; border-color: var(--coffee); box-shad
 /* offers */
 .offers { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .offer { border: 1px solid var(--line); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; }
-.offer img { width: 100%; height: 130px; object-fit: cover; border-radius: 8px; background: var(--cream); }
+.offer img, .offer .offer-img { width: 100%; height: 130px; object-fit: cover; border-radius: 8px; background: var(--cream); }
 .offer .offer-title { font-weight: 600; margin-top: 10px; }
 .offer .offer-sub { color: var(--muted); font-size: 13px; }
 .offer .offer-price { margin: 6px 0 10px; font-variant-numeric: tabular-nums; }

@@ -8,8 +8,10 @@ them while the order is still open.
 What customers can do (within an edit window):
 
 - **Fix the shipping address** — corrected straight on the Shopify order.
+  Country is locked (shipping was priced for it); everything else is editable.
 - **Swap an item** — change size / grind / blend to another variant of the same
-  product (equal-or-cheaper by default).
+  product (equal-or-cheaper by default). Any discount the customer originally
+  received is carried over to the replacement line.
 - **Add an item / upsell** — add a curated product at a discount; Shopify emails
   a secure link to pay the small balance, then it ships with the order.
 
@@ -26,21 +28,31 @@ Customer ──▶  /edit?token=…  (link in confirmation email / order-status 
                     │
                     ▼
          Express portal  ──GraphQL──▶  Shopify Admin API
-         · verifies ownership (signed token, or email match)
+         · verifies ownership (signed token, or email match → then issues a token)
          · checks eligibility (unfulfilled + inside the edit window)
-         · address  → orderUpdate
-         · swap     → orderEditBegin → addVariant + setQuantity(0) → orderEditCommit
-         · upsell   → orderEditBegin → addVariant + lineItemDiscount → orderEditCommit → orderInvoiceSend
+         · address  → orderUpdate                    (country locked)
+         · swap     → orderEditBegin → addVariant (+ carried-over discount)
+                      → setQuantity(0, restock) → orderEditCommit → invoice if balance
+         · upsell   → orderEditBegin → addVariant + lineItemDiscount
+                      → orderEditCommit → orderInvoiceSend
 ```
 
 **Eligibility** mirrors Order Editing's "edit window": an order is editable only
 while it is **unfulfilled, not cancelled, and within `editWindowMinutes` of being
-placed**. Every change re-checks this on the server. Subscription (Recharge) line
-items are never swappable.
+placed**. Every change re-checks this on the server, and mutations on the same
+order are serialised so a double-click can't run two overlapping edit sessions.
+Subscription (Recharge) line items are never swappable.
 
-**Payment for added items:** adding a product raises the order total, leaving a
-balance. The app commits the edit and asks Shopify to email the customer a secure
-pay link (`orderInvoiceSend`). This keeps the app completely out of card data.
+**Money movements** stay inside Shopify:
+
+- If an edit leaves a balance owing (pricier swap when enabled, upsell), the app
+  asks Shopify to email a secure pay link (`orderInvoiceSend`) — no card data
+  ever touches this app.
+- If a swap makes the order cheaper, the customer is told the difference will be
+  refunded (the refund itself is processed by you in Shopify admin).
+- Swaps preserve the customer's effective per-unit discount as a manual line
+  discount, because Shopify never applies original order discounts to
+  edit-added lines.
 
 ---
 
@@ -72,6 +84,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ```bash
 npm install
+npm test    # unit tests (tokens, eligibility, settings, helpers)
 npm start
 # → http://localhost:3000        (customer portal)
 # → http://localhost:3000/admin  (settings; user = anything, password = ADMIN_PASSWORD)
@@ -122,32 +135,42 @@ Heroku-style platforms (Heroku, Render, Railway).
 
 - **No card data** ever touches this app — balances are paid via Shopify’s hosted
   invoice.
-- **Ownership** is enforced two ways: signed-link tokens (HMAC) can’t be forged,
-  and the manual lookup matches the entered email against the order’s email, so
-  one customer can never load another’s order.
+- **Ownership** is enforced two ways: signed-link tokens (HMAC, timing-safe
+  verification) can’t be forged, and the manual lookup matches the entered email
+  against the order’s email — one customer can never load another’s order. After
+  a successful lookup the client is handed a signed session token.
+- **Every** portal endpoint is rate-limited per IP (lookups more strictly), so
+  there is no brute-force side door via the mutation endpoints.
+- Admin login is rate-limited after repeated failures, compared timing-safely,
+  and the admin page **and its JavaScript** are only served with credentials.
+- Standard hardening headers are set (CSP, `frame-ancestors 'none'`, `nosniff`,
+  HSTS, no-referrer), API responses are `Cache-Control: no-store`, and customers
+  only ever see sanitised error messages.
 - The Admin API token lives only on the server and is never sent to the browser.
-- `/admin` is protected by HTTP Basic auth (`ADMIN_PASSWORD`).
-- Lookups are rate-limited per IP.
+- Per-order mutation locking prevents overlapping order-edit sessions.
 
 ## Project layout
 
 ```
-server.js                 Express bootstrap + routes
+server.js                 Express bootstrap, security headers, routes
 src/config.js             env config
-src/shopify.js            Admin GraphQL client + all order operations
+src/shopify.js            Admin GraphQL client (+timeout/retry) + order operations
 src/tokens.js             signed edit-link tokens
 src/settings.js           merchant settings (defaults → file → env)
-src/eligibility.js        edit-window / eligibility rules
+src/eligibility.js        edit-window / line-item swap rules
 src/routes/portal.js      customer API (lookup, address, swap, upsell)
 src/routes/admin.js       merchant settings API (password protected)
 config/settings.default.json   committed default settings
-public/                   portal + admin UI (no build step)
+public/                   customer portal UI (no build step)
+private/                  admin UI, served only with credentials
+test/                     unit tests (node --test)
 ```
 
 ## Not in this version (easy next steps)
 
 - Cancel order / remove items + refund-to-store-credit.
 - Inline card payment for upsells (instead of an emailed pay link).
+- Automatic refunds for cheaper swaps (currently flagged for manual processing).
 - Holding orders from a 3PL during the window (`fulfillmentOrderHold`) — useful
   only once fulfillment is automated.
 - One-click signed links auto-injected into Shopify notification emails.

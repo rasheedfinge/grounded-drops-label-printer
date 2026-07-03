@@ -3,9 +3,10 @@
 /**
  * Thin Shopify Admin GraphQL client plus every order operation the portal needs.
  *
- * All GraphQL shapes here were checked against the live Admin schema
- * (introspection + shopify.dev docs). The order-editing flow follows Shopify's
- * three steps: orderEditBegin -> stage changes -> orderEditCommit.
+ * All GraphQL shapes were checked against the live Admin schema (introspection
+ * + shopify.dev docs), and the read queries were executed against the real
+ * store. The order-editing flow follows Shopify's three steps:
+ * orderEditBegin -> stage changes -> orderEditCommit.
  */
 
 const config = require('./config');
@@ -14,10 +15,20 @@ function endpoint() {
   return `https://${config.shop}/admin/api/${config.apiVersion}/graphql.json`;
 }
 
-async function gql(query, variables = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Run a GraphQL operation. Read queries get a short retry on throttling /
+ * gateway blips; mutations never auto-retry (a duplicated order-edit commit
+ * would be worse than a failed one).
+ */
+async function gql(query, variables = {}, attempt = 0) {
   if (!config.shop || !config.adminToken) {
     throw new Error('Shopify is not configured (set SHOPIFY_SHOP and SHOPIFY_ADMIN_TOKEN).');
   }
+  const isMutation = /^\s*mutation/i.test(query);
+  const retryable = !isMutation && attempt < 2;
+
   let res;
   try {
     res = await fetch(endpoint(), {
@@ -27,10 +38,21 @@ async function gql(query, variables = {}) {
         'X-Shopify-Access-Token': config.adminToken,
       },
       body: JSON.stringify({ query, variables }),
+      signal: AbortSignal.timeout(15000),
     });
   } catch (err) {
+    if (retryable) {
+      await sleep(400 * (attempt + 1));
+      return gql(query, variables, attempt + 1);
+    }
     throw new Error(`Could not reach Shopify: ${err.message}`);
   }
+
+  if ((res.status === 429 || res.status === 502 || res.status === 503) && retryable) {
+    await sleep(600 * (attempt + 1));
+    return gql(query, variables, attempt + 1);
+  }
+
   const text = await res.text();
   let body;
   try {
@@ -39,15 +61,44 @@ async function gql(query, variables = {}) {
     throw new Error(`Shopify returned a non-JSON response (HTTP ${res.status}).`);
   }
   if (body.errors) {
+    const throttled = Array.isArray(body.errors) &&
+      body.errors.some((e) => e.extensions && e.extensions.code === 'THROTTLED');
+    if (throttled && retryable) {
+      await sleep(1000 * (attempt + 1));
+      return gql(query, variables, attempt + 1);
+    }
     const msg = Array.isArray(body.errors) ? body.errors.map((e) => e.message).join('; ') : JSON.stringify(body.errors);
     throw new Error(`Shopify GraphQL error: ${msg}`);
   }
   return body.data;
 }
 
-const numericId = (gid) => (String(gid || '').match(/\d+/g) || []).join('');
+/* ----------------------------------------------------------- pure helpers */
+
+/** Last run of digits in a GID, e.g. gid://shopify/LineItem/123 -> "123". */
+const numericId = (gid) => {
+  const groups = String(gid || '').match(/\d+/g);
+  return groups ? groups[groups.length - 1] : '';
+};
+
 const digitsOf = (s) => (String(s || '').match(/\d/g) || []).join('');
+
 const money = (set) => (set && set.presentmentMoney ? Number(set.presentmentMoney.amount) : null);
+
+/**
+ * The discount (as a percentage) a customer effectively received on a line,
+ * derived from what they paid per unit vs the undiscounted unit price.
+ * Used to carry their pricing over to a replacement line during a swap,
+ * because order-edit-added items never inherit the original discounts.
+ */
+function effectiveDiscountPercent(originalUnit, paidUnit) {
+  const orig = Number(originalUnit);
+  const paid = Number(paidUnit);
+  if (!Number.isFinite(orig) || orig <= 0) return 0;
+  if (!Number.isFinite(paid) || paid >= orig) return 0;
+  const pct = (1 - paid / orig) * 100;
+  return Math.min(100, Math.max(0, Math.round(pct * 100) / 100));
+}
 
 /* ------------------------------------------------------------------ reads */
 
@@ -71,7 +122,7 @@ const ORDER_FIELDS = `
     image { url altText }
     sellingPlan { name }
     originalUnitPriceSet { presentmentMoney { amount currencyCode } }
-    discountedUnitPriceSet { presentmentMoney { amount currencyCode } }
+    discountedUnitPriceAfterAllDiscountsSet { presentmentMoney { amount currencyCode } }
     variant { id title price availableForSale selectedOptions { name value } }
     product { id title handle hasOnlyDefaultVariant totalVariants status tags }
   } } }
@@ -132,19 +183,41 @@ async function getProductVariants(productGid, cap = 250) {
   return { id: product && product.id, title: product && product.title, variants: out.slice(0, cap) };
 }
 
+const VARIANT_FIELDS = `
+  id title price availableForSale
+  image { url altText }
+  selectedOptions { name value }
+  product {
+    id title status
+    featuredMedia { preview { image { url } } }
+  }
+`;
+
+/** The best display image for a variant: its own image, else the product's. */
+function variantImage(v) {
+  if (!v) return null;
+  if (v.image && v.image.url) return v.image.url;
+  const fm = v.product && v.product.featuredMedia;
+  return (fm && fm.preview && fm.preview.image && fm.preview.image.url) || null;
+}
+
 async function getVariant(variantGid) {
   const data = await gql(
-    `query($id: ID!) {
-      productVariant(id: $id) {
-        id title price availableForSale
-        image { url altText }
-        selectedOptions { name value }
-        product { id title status }
-      }
-    }`,
+    `query($id: ID!) { productVariant(id: $id) { ${VARIANT_FIELDS} } }`,
     { id: variantGid }
   );
   return data.productVariant;
+}
+
+/** Batch-fetch variants by GID in one round trip (order preserved, nulls kept). */
+async function getVariantsByIds(variantGids) {
+  if (!variantGids || !variantGids.length) return [];
+  const data = await gql(
+    `query($ids: [ID!]!) { nodes(ids: $ids) { ... on ProductVariant { ${VARIANT_FIELDS} } } }`,
+    { ids: variantGids }
+  );
+  // nodes() yields null for missing ids and {} for non-variant nodes.
+  return (data.nodes || []).map((n) => (n && n.id ? n : null));
 }
 
 /* --------------------------------------------------------------- normalize */
@@ -156,13 +229,16 @@ function normalizeOrder(order) {
     'AUD';
   const lineItems = (order.lineItems.edges || []).map((e) => {
     const li = e.node;
+    const unitPrice = money(li.originalUnitPriceSet);
+    const paidUnitPrice = money(li.discountedUnitPriceAfterAllDiscountsSet);
     return {
       id: li.id,
       title: li.title,
       variantTitle: li.variantTitle,
       quantity: li.currentQuantity ?? li.quantity,
       image: li.image ? li.image.url : null,
-      unitPrice: money(li.originalUnitPriceSet),
+      unitPrice,
+      paidUnitPrice: paidUnitPrice != null ? paidUnitPrice : unitPrice,
       isSubscription: Boolean(li.sellingPlan),
       variantId: li.variant ? li.variant.id : null,
       productId: li.product ? li.product.id : null,
@@ -303,9 +379,25 @@ async function sendInvoice(orderGid, { to, subject, customMessage } = {}) {
 
 /**
  * Swap one line item to a different variant of the same product:
- * add the new variant, then zero-out (and restock) the original, then commit.
+ * add the new variant (carrying over the customer's effective discount),
+ * zero-out and restock the original, commit, then settle any balance.
+ *
+ * Order-edit-added lines never inherit the original order's discounts, so
+ * without `preserveDiscountPercent` a discounted customer would silently be
+ * re-charged full price on a like-for-like swap.
  */
-async function swapVariant(orderGid, { originalLineItemId, originalVariantId, newVariantId, quantity, notifyCustomer, staffNote }) {
+async function swapVariant(orderGid, {
+  originalLineItemId,
+  originalVariantId,
+  newVariantId,
+  quantity,
+  preserveDiscountPercent,
+  notifyCustomer,
+  staffNote,
+  invoice,
+  invoiceEmail,
+  orderName,
+}) {
   const calc = await beginEdit(orderGid);
   const nodes = (calc.lineItems.edges || []).map((e) => e.node);
   // The calculated line item for an existing line carries the original line
@@ -318,17 +410,41 @@ async function swapVariant(orderGid, { originalLineItemId, originalVariantId, ne
   if (!target) {
     throw new Error('That item could not be found on the order any more — it may already have changed.');
   }
-  await editAddVariant(calc.id, newVariantId, quantity || target.quantity || 1);
+  const added = await editAddVariant(calc.id, newVariantId, quantity || target.quantity || 1);
+  const pct = Number(preserveDiscountPercent) || 0;
+  if (pct > 0) {
+    await editAddLineItemDiscount(calc.id, added.id, pct, 'Carried over from your original order');
+  }
   await editSetQuantity(calc.id, target.id, 0, true);
   const order = await commitEdit(calc.id, notifyCustomer, staffNote);
-  return { outstanding: money(order.totalOutstandingSet) || 0 };
+  const outstanding = money(order.totalOutstandingSet) || 0;
+
+  let invoiced = false;
+  if (invoice && outstanding > 0) {
+    await sendInvoice(orderGid, {
+      to: invoiceEmail,
+      subject: `Payment link for your updated order${orderName ? ` ${orderName}` : ''}`,
+      customMessage: 'Your order was updated as requested. Use the secure link below to pay the difference and we’ll get it packed.',
+    });
+    invoiced = true;
+  }
+  return { outstanding, invoiced };
 }
 
 /**
  * Add an upsell item to the order at a discount, then commit. If the edit
  * leaves a balance owing, optionally email the customer a secure pay link.
  */
-async function addUpsellItem(orderGid, { variantId, quantity, discountPercent, invoice, invoiceEmail, notifyCustomer, staffNote }) {
+async function addUpsellItem(orderGid, {
+  variantId,
+  quantity,
+  discountPercent,
+  invoice,
+  invoiceEmail,
+  notifyCustomer,
+  staffNote,
+  orderName,
+}) {
   const calc = await beginEdit(orderGid);
   const added = await editAddVariant(calc.id, variantId, quantity || 1);
   if (discountPercent && discountPercent > 0) {
@@ -340,7 +456,7 @@ async function addUpsellItem(orderGid, { variantId, quantity, discountPercent, i
   if (invoice && outstanding > 0) {
     await sendInvoice(orderGid, {
       to: invoiceEmail,
-      subject: `Complete your addition to order`,
+      subject: `Payment link for your addition to order${orderName ? ` ${orderName}` : ''}`,
       customMessage: 'Thanks for adding to your order! Use the secure link below to pay the small balance and we’ll pack it together.',
     });
     invoiced = true;
@@ -351,11 +467,15 @@ async function addUpsellItem(orderGid, { variantId, quantity, discountPercent, i
 module.exports = {
   gql,
   numericId,
+  digitsOf,
+  effectiveDiscountPercent,
+  variantImage,
   getShopInfo,
   getOrderByGid,
   findOrderByNumberAndEmail,
   getProductVariants,
   getVariant,
+  getVariantsByIds,
   normalizeOrder,
   updateShippingAddress,
   swapVariant,

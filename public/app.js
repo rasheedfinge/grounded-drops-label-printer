@@ -7,6 +7,11 @@ let creds = null; // { token } or { orderNumber, email }
 let state = null; // last /lookup response
 let countdownTimer = null;
 
+// Hide broken product images (CSP forbids inline onerror handlers).
+document.addEventListener('error', (e) => {
+  if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden';
+}, true);
+
 /* ----------------------------------------------------------------- utils */
 
 function money(n, cur) {
@@ -23,13 +28,17 @@ function esc(s) {
   }[c]));
 }
 
+function img(url, cls) {
+  return url ? `<img class="${cls || ''}" src="${esc(url)}" alt="" />` : `<span class="imgph ${cls || ''}"></span>`;
+}
+
 function toast(msg, type = 'ok') {
   const el = $('#toast');
   el.textContent = msg;
   el.className = `toast ${type}`;
   el.hidden = false;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => { el.hidden = true; }, 5000);
+  toast._t = setTimeout(() => { el.hidden = true; }, 6000);
 }
 
 function setLoading(btn, loading, label) {
@@ -37,9 +46,11 @@ function setLoading(btn, loading, label) {
   if (loading) {
     btn.dataset.label = btn.textContent;
     btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
     btn.innerHTML = '<span class="spinner"></span>' + (label ? ` ${esc(label)}` : '');
   } else {
     btn.disabled = false;
+    btn.removeAttribute('aria-busy');
     btn.textContent = btn.dataset.label || btn.textContent;
   }
 }
@@ -58,6 +69,7 @@ async function api(path, body) {
 /* --------------------------------------------------------------- rendering */
 
 function renderStatus(data) {
+  clearInterval(countdownTimer);
   const el = $('#statusCard');
   const { eligibility } = data;
   if (eligibility.editable) {
@@ -70,15 +82,14 @@ function renderStatus(data) {
 }
 
 function startCountdown(closesAt) {
-  clearInterval(countdownTimer);
   const banner = $('#statusBanner');
-  if (!banner) return;
+  if (!banner || !closesAt) return;
   const tick = () => {
     const ms = closesAt - Date.now();
     if (ms <= 0) {
       clearInterval(countdownTimer);
-      banner.className = 'banner warn';
-      banner.innerHTML = 'The edit window for this order has just closed.';
+      // Re-render from the server so the editing sections disappear too.
+      refresh().catch(() => {});
       return;
     }
     const mins = Math.floor(ms / 60000);
@@ -92,15 +103,18 @@ function startCountdown(closesAt) {
 }
 
 function renderSummary(order) {
-  const items = order.lineItems.map((li) => `
+  const items = order.lineItems.map((li) => {
+    const unit = li.paidUnitPrice != null ? li.paidUnitPrice : li.unitPrice;
+    return `
     <div class="li">
-      <img src="${esc(li.image || '')}" alt="" onerror="this.style.visibility='hidden'" />
+      ${img(li.image)}
       <div class="li-body">
         <div class="li-title">${esc(li.title)}${li.isSubscription ? '<span class="pill">subscription</span>' : ''}</div>
         <div class="li-sub">${esc(li.variantTitle && li.variantTitle !== 'Default Title' ? li.variantTitle : '')} ${li.quantity > 1 ? '× ' + li.quantity : ''}</div>
       </div>
-      <div class="li-price">${money(li.unitPrice * li.quantity, order.currency)}</div>
-    </div>`).join('');
+      <div class="li-price">${money(unit * li.quantity, order.currency)}</div>
+    </div>`;
+  }).join('');
   $('#summaryCard').innerHTML = `
     <div class="order-meta">
       <span class="name">Order ${esc(order.name)}</span>
@@ -124,6 +138,44 @@ function renderAddress(data) {
   set('#a_zip', a.zip);
   set('#a_country', a.country);
   set('#a_phone', a.phone);
+  // Country is locked once set: shipping was priced for that destination.
+  const country = $('#a_country');
+  const locked = Boolean(a.country);
+  country.readOnly = locked;
+  country.classList.toggle('locked', locked);
+  $('#countryHint').hidden = !locked;
+  // Postcode requirement mirrors the original address.
+  $('#a_zip').required = Boolean(a.zip);
+}
+
+/** Build the swap <select>, grouping by the first product option (e.g. Blend)
+    so 100-variant products stay navigable. */
+function fillSwapSelect(select, data) {
+  const opts = data.options || [];
+  if (!opts.length) {
+    select.innerHTML = '<option value="">No other options available</option>';
+    return false;
+  }
+  const placeholder = '<option value="">Choose an option…</option>';
+  const grouped = opts.some((o) => (o.options || []).length > 1);
+  if (!grouped) {
+    select.innerHTML = placeholder + opts.map((o) =>
+      `<option value="${esc(o.variantId)}">${esc(o.title)} — ${money(o.price, data.currency)}</option>`).join('');
+    return true;
+  }
+  const groups = new Map();
+  for (const o of opts) {
+    const key = (o.options && o.options[0] && o.options[0].value) || 'Options';
+    const label = (o.options || []).slice(1).map((x) => x.value).join(' / ') || o.title;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push({ ...o, label });
+  }
+  select.innerHTML = placeholder + [...groups.entries()].map(([key, list]) =>
+    `<optgroup label="${esc(key)}">` +
+    list.map((o) => `<option value="${esc(o.variantId)}">${esc(o.label)} — ${money(o.price, data.currency)}</option>`).join('') +
+    '</optgroup>'
+  ).join('');
+  return true;
 }
 
 function renderSwap(data) {
@@ -159,7 +211,7 @@ function renderUpsell(data) {
   const cur = data.order.currency;
   $('#upsellGrid').innerHTML = offers.map((o) => `
     <div class="offer" data-variant="${esc(o.variantId)}">
-      <img src="${esc(o.image || '')}" alt="" onerror="this.style.visibility='hidden'" />
+      ${img(o.image, 'offer-img')}
       <div class="offer-title">${esc(o.title)}</div>
       <div class="offer-sub">${esc(o.variantTitle || '')}</div>
       <div class="offer-price">
@@ -184,6 +236,9 @@ function render(data) {
 
 async function refresh() {
   const data = await api('lookup', {});
+  // Once ownership is proven, switch to the signed session token so later
+  // calls skip the order search (and survive typos in re-entered details).
+  if (data.sessionToken) creds = { token: data.sessionToken };
   state = data;
   render(data);
 }
@@ -239,13 +294,10 @@ $('#swapList').addEventListener('click', async (e) => {
     const save = row.querySelector('.swap-save');
     try {
       const data = await api('swap-options', { lineItemId });
-      if (!data.options.length) {
-        select.innerHTML = '<option>No other options available</option>';
-        return;
+      const hasOptions = fillSwapSelect(select, data);
+      if (hasOptions) {
+        select.onchange = () => { save.disabled = !select.value; };
       }
-      select.innerHTML = '<option value="">Choose an option…</option>' + data.options.map((o) =>
-        `<option value="${esc(o.variantId)}">${esc(o.title)} — ${money(o.price, data.currency)}</option>`).join('');
-      select.onchange = () => { save.disabled = !select.value; };
     } catch (err) {
       select.innerHTML = '<option>Could not load options</option>';
       toast(err.message, 'err');

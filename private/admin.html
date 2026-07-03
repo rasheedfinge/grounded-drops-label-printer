@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex" />
   <title>Order editor — settings</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%98%95%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
   <style>
     .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); }
@@ -18,7 +19,7 @@
     .results { margin-top: 10px; max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
     .presult { display: flex; gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid var(--line); }
     .presult:first-child { border-top: none; }
-    .presult img { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--cream); }
+    .presult img, .presult .imgph { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--cream); flex: none; }
     .vbtn { font-size: 12px; padding: 4px 8px; }
     code { background: var(--cream); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
   </style>
@@ -29,7 +30,7 @@
   <main class="wrap" style="padding:28px 20px 60px">
     <div class="card">
       <h2>What can customers do?</h2>
-      <div class="row switch"><div><strong>Fix shipping address</strong><div class="desc">Let customers correct their delivery address.</div></div><input type="checkbox" id="allowAddressEdit" /></div>
+      <div class="row switch"><div><strong>Fix shipping address</strong><div class="desc">Let customers correct their delivery address (same country only).</div></div><input type="checkbox" id="allowAddressEdit" /></div>
       <div class="row switch"><div><strong>Swap items / change variant</strong><div class="desc">Switch size, grind, or another option of the same product.</div></div><input type="checkbox" id="allowVariantSwap" /></div>
       <div class="row switch"><div><strong>Add items / upsell</strong><div class="desc">Offer the curated products below as post-purchase add-ons.</div></div><input type="checkbox" id="allowUpsell" /></div>
     </div>
@@ -41,9 +42,9 @@
         <label>Upsell discount (%)<input type="number" id="upsellDiscountPercent" min="0" max="100" /></label>
         <label>Swap price tolerance ($)<input type="number" id="swapPriceTolerance" min="0" step="0.01" /></label>
       </div>
-      <div class="row switch" style="margin-top:8px"><div><strong>Allow swaps to pricier options</strong><div class="desc">If off, customers can only switch to an equal or cheaper option.</div></div><input type="checkbox" id="allowPricedSwaps" /></div>
+      <div class="row switch" style="margin-top:8px"><div><strong>Allow swaps to pricier options</strong><div class="desc">If off, customers can only switch to an equal or cheaper option. If on, the price difference is collected via an emailed pay link.</div></div><input type="checkbox" id="allowPricedSwaps" /></div>
       <div class="row switch"><div><strong>Email customer when an edit is made</strong><div class="desc">Sends Shopify's order-updated email after address/swap changes.</div></div><input type="checkbox" id="notifyCustomerOnEdit" /></div>
-      <div class="row switch"><div><strong>Email a pay link for added items</strong><div class="desc">When an upsell adds a balance, email a secure Shopify payment link.</div></div><input type="checkbox" id="invoiceForBalance" /></div>
+      <div class="row switch"><div><strong>Email a pay link for balances</strong><div class="desc">When a swap or added item leaves a balance, email a secure Shopify payment link.</div></div><input type="checkbox" id="invoiceForBalance" /></div>
       <label style="margin-top:14px">Exclude products with these tags from swaps (comma separated)<input id="excludeProductTags" placeholder="Subscription" /></label>
     </div>
 
@@ -74,7 +75,7 @@
     </div>
   </main>
 
-  <div id="toast" class="toast" hidden></div>
-  <script src="/admin.js"></script>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/admin/app.js"></script>
 </body>
 </html>

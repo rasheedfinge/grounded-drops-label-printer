@@ -8,6 +8,11 @@ let settings = null;
 let upsellIds = [];
 const titles = new Map(); // variantId -> { title, variantTitle, price }
 
+// Hide broken product images (CSP forbids inline onerror handlers).
+document.addEventListener('error', (e) => {
+  if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden';
+}, true);
+
 function toast(msg, type = 'ok') {
   const el = $('#toast');
   el.textContent = msg;
@@ -20,6 +25,9 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function money(n) { return '$' + (Number(n) || 0).toFixed(2); }
+function img(url, cls) {
+  return url ? `<img class="${cls || ''}" src="${esc(url)}" alt="" />` : `<span class="imgph ${cls || ''}"></span>`;
+}
 
 async function getJSON(url) {
   const res = await fetch(url);
@@ -71,7 +79,8 @@ function renderChips() {
     ? upsellIds.map((id) => {
         const t = titles.get(id);
         const label = t ? `${t.title}${t.variantTitle ? ' · ' + t.variantTitle : ''} (${money(t.price)})` : id;
-        return `<span class="chip">${esc(label)}<button data-id="${esc(id)}" title="Remove">✕</button></span>`;
+        const stock = t && t.availableForSale === false ? ' — out of stock' : '';
+        return `<span class="chip">${esc(label + stock)}<button data-id="${esc(id)}" title="Remove" aria-label="Remove ${esc(label)}">✕</button></span>`;
       }).join('')
     : '<p class="muted small">No upsell products yet — search below to add some.</p>';
 }
@@ -99,10 +108,10 @@ async function runSearch(q) {
     box.hidden = false;
     box.innerHTML = data.products.map((p) => `
       <div class="presult">
-        <img src="${esc(p.image || '')}" alt="" onerror="this.style.visibility='hidden'" />
+        ${img(p.image)}
         <div style="flex:1">
           <div><strong>${esc(p.title)}</strong> ${p.status !== 'ACTIVE' ? '<span class="pill">' + esc(p.status) + '</span>' : ''}</div>
-          <div>${p.variants.map((v) => `<button class="btn ghost vbtn add-variant" data-id="${esc(v.id)}" data-title="${esc(p.title)}" data-vt="${esc(v.title)}" data-price="${v.price}">${esc(v.title === 'Default Title' ? 'Add' : v.title)} · ${money(v.price)}</button>`).join(' ')}</div>
+          <div>${p.variants.map((v) => `<button class="btn ghost vbtn add-variant" data-id="${esc(v.id)}" data-title="${esc(p.title)}" data-vt="${esc(v.title)}" data-price="${v.price}"${v.availableForSale ? '' : ' disabled title="Out of stock"'}>${esc(v.title === 'Default Title' ? 'Add' : v.title)} · ${money(v.price)}</button>`).join(' ')}</div>
         </div>
       </div>`).join('') || '<div class="presult muted">No products found.</div>';
   } catch (err) {
@@ -117,7 +126,7 @@ $('#searchResults').addEventListener('click', (e) => {
   if (upsellIds.includes(id)) { toast('Already added.', 'ok'); return; }
   if (upsellIds.length >= 8) { toast('Maximum of 8 upsell products.', 'err'); return; }
   upsellIds.push(id);
-  titles.set(id, { title: btn.dataset.title, variantTitle: btn.dataset.vt !== 'Default Title' ? btn.dataset.vt : null, price: Number(btn.dataset.price) });
+  titles.set(id, { title: btn.dataset.title, variantTitle: btn.dataset.vt !== 'Default Title' ? btn.dataset.vt : null, price: Number(btn.dataset.price), availableForSale: true });
   renderChips();
   toast('Added.', 'ok');
 });

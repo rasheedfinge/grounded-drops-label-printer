@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="robots" content="noindex" />
   <title>Edit your order</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%98%95%3C/text%3E%3C/svg%3E" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
@@ -16,6 +17,10 @@
   </header>
 
   <main class="wrap" id="main">
+    <noscript>
+      <section class="card"><p>This page needs JavaScript to edit your order. Please enable it, or reply to your order confirmation email and we’ll help.</p></section>
+    </noscript>
+
     <!-- Lookup -->
     <section class="card lookup" id="lookupCard">
       <h1>Edit your order</h1>
@@ -42,15 +47,16 @@
       <div class="card" id="addressCard" hidden>
         <h2>Shipping address</h2>
         <form id="addressForm" class="grid">
-          <label>First name<input id="a_firstName" required /></label>
-          <label>Last name<input id="a_lastName" required /></label>
-          <label class="full">Address<input id="a_address1" required /></label>
-          <label class="full">Apartment, suite, etc. (optional)<input id="a_address2" /></label>
-          <label>City<input id="a_city" required /></label>
-          <label>State / Province<input id="a_province" /></label>
-          <label>Postcode<input id="a_zip" /></label>
-          <label>Country<input id="a_country" required /></label>
-          <label class="full">Phone (optional)<input id="a_phone" /></label>
+          <label>First name<input id="a_firstName" autocomplete="given-name" required /></label>
+          <label>Last name<input id="a_lastName" autocomplete="family-name" required /></label>
+          <label class="full">Address<input id="a_address1" autocomplete="address-line1" required /></label>
+          <label class="full">Apartment, suite, etc. (optional)<input id="a_address2" autocomplete="address-line2" /></label>
+          <label>City<input id="a_city" autocomplete="address-level2" required /></label>
+          <label>State / Province<input id="a_province" autocomplete="address-level1" /></label>
+          <label>Postcode<input id="a_zip" autocomplete="postal-code" required /></label>
+          <label>Country<input id="a_country" autocomplete="country-name" required /></label>
+          <p class="full hint" id="countryHint" hidden>Shipping was quoted for this country, so it can’t be changed here — contact us if you need to ship somewhere else.</p>
+          <label class="full">Phone (optional)<input id="a_phone" type="tel" autocomplete="tel" /></label>
           <div class="full actions">
             <button type="submit" class="btn primary" id="addressBtn">Save address</button>
           </div>
@@ -71,7 +77,7 @@
     </section>
   </main>
 
-  <div id="toast" class="toast" hidden></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
   <footer class="site-footer">
     <div class="wrap muted small">Changes are applied to your order instantly. Questions? Just reply to your order email.</div>

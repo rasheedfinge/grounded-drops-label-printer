@@ -25,15 +25,41 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(ab, bb);
 }
 
+// Failed-attempt tracking so the shared password can't be brute-forced.
+const AUTH_FAIL_LIMIT = 10;
+const AUTH_FAIL_WINDOW_MS = 10 * 60 * 1000;
+const authFails = new Map(); // ip -> { count, resetAt }
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, rec] of authFails) if (now > rec.resetAt) authFails.delete(ip);
+}, 5 * 60 * 1000).unref();
+
 function requireAuth(req, res, next) {
   if (!config.adminPassword) {
     return res.status(500).send('ADMIN_PASSWORD is not set on the server.');
   }
+  const ip = req.ip || 'unknown';
+  const now = Date.now();
+  const fails = authFails.get(ip);
+  if (fails && now <= fails.resetAt && fails.count >= AUTH_FAIL_LIMIT) {
+    return res.status(429).send('Too many failed sign-in attempts. Try again later.');
+  }
+
   const header = req.headers.authorization || '';
   const [scheme, encoded] = header.split(' ');
   if (scheme === 'Basic' && encoded) {
     const [, password] = Buffer.from(encoded, 'base64').toString().split(':');
-    if (safeEqual(password || '', config.adminPassword)) return next();
+    if (safeEqual(password || '', config.adminPassword)) {
+      authFails.delete(ip);
+      return next();
+    }
+    // Only count actual wrong-password attempts, not the browser's initial
+    // credential-less request that triggers the login prompt.
+    if (!fails || now > fails.resetAt) {
+      authFails.set(ip, { count: 1, resetAt: now + AUTH_FAIL_WINDOW_MS });
+    } else {
+      fails.count += 1;
+    }
   }
   res.set('WWW-Authenticate', 'Basic realm="Order editor admin"');
   return res.status(401).send('Authentication required.');
@@ -121,8 +147,12 @@ router.get('/search-products', async (req, res) => {
 // Resolve a list of variant GIDs to titles/prices (for displaying upsell chips).
 router.get('/resolve-variants', async (req, res) => {
   try {
-    const ids = String(req.query.ids || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 8);
-    const variants = await Promise.all(ids.map((id) => shopify.getVariant(id).catch(() => null)));
+    const ids = String(req.query.ids || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => /^gid:\/\/shopify\/ProductVariant\/\d+$/.test(s))
+      .slice(0, 8);
+    const variants = await shopify.getVariantsByIds(ids);
     res.json({
       variants: variants.filter(Boolean).map((v) => ({
         id: v.id,

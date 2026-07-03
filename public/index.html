@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grounded Drops Label Editor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #2d2d2d;
+            color: #fff;
+            padding: 20px;
+            margin: 0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .editor-section {
+            background-color: #3d3d3d;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-row {
+            display: flex;
+            gap: 15px;
+        }
+        .input-row .input-group { flex: 1; }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input[type="text"], input[type="date"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #555;
+            background-color: #1d1d1d;
+            color: #fff;
+            border-radius: 4px;
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+
+        .label-preview {
+            background-color: #fff;
+            color: #000;
+            width: 300px;
+            height: 300px;
+            margin: 20px auto;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        .label-header {
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: normal;
+            max-width: 100%;
+            word-wrap: break-word;
+        }
+
+        .label-title {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .label-discount {
+            font-size: 36px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .label-subtitle {
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+
+        .qr-code {
+            width: 150px;
+            height: 150px;
+            margin-bottom: 10px;
+        }
+
+        .label-code {
+            font-size: 10px;
+            font-weight: bold;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        .print-button {
+            background-color: #28a745;
+        }
+
+        .print-button:hover {
+            background-color: #218838;
+        }
+
+        .info-text {
+            text-align: center;
+            color: #999;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        @media print {
+            body {
+                background-color: white;
+                color: black;
+            }
+            .container > h1,
+            .editor-section:first-of-type,
+            .editor-section h2,
+            .buttons,
+            .info-text {
+                display: none;
+            }
+            .label-preview {
+                margin: 0;
+                box-shadow: none;
+                border: 1px solid #000;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Grounded Drops Label Editor</h1>
+
+        <div class="editor-section">
+            <h2>Customize Your Label</h2>
+
+            <div class="input-group">
+                <label for="headerText">Header Text (appears above discount):</label>
+                <input
+                    type="text"
+                    id="headerText"
+                    placeholder="Enter custom header text..."
+                    value="Here is your code for your next order"
+                    maxlength="50"
+                >
+            </div>
+
+            <div class="input-row">
+                <div class="input-group">
+                    <label for="discountCode">Discount Code:</label>
+                    <input type="text" id="discountCode" value="GDmdxxmf3zdP7468">
+                </div>
+                <div class="input-group">
+                    <label for="discountAmount">Discount:</label>
+                    <input type="text" id="discountAmount" value="15% OFF" maxlength="20">
+                </div>
+                <div class="input-group">
+                    <label for="expiryDate">Expires:</label>
+                    <input type="date" id="expiryDate">
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label for="storeUrl">Store URL (the QR code opens this with the code pre-applied):</label>
+                <input type="text" id="storeUrl" value="https://groundeddrops.com">
+            </div>
+        </div>
+
+        <div class="editor-section">
+            <h2>Label Preview</h2>
+
+            <div class="label-preview" id="labelPreview">
+                <div class="label-header" id="previewHeader">Here is your code for your next order</div>
+                <div class="label-title">GROUNDED DROPS</div>
+                <div class="label-discount" id="previewDiscount">15% OFF</div>
+                <div class="label-subtitle">NEXT ORDER</div>
+                <img class="qr-code" id="qrImage" alt="Scan to apply your discount" src="">
+                <div class="label-code" id="previewCode">GDmdxxmf3zdP7468</div>
+                <div class="label-code" id="previewExpiry" style="font-size: 8px; margin-top: 5px;"></div>
+            </div>
+
+            <div class="buttons">
+                <button onclick="resetText()">Reset to Default</button>
+                <button class="print-button" onclick="window.print()">Print Label</button>
+            </div>
+
+            <div class="info-text">
+                The QR code opens your store with the discount code applied automatically
+                (<span id="qrUrlPreview"></span>).
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DEFAULTS = {
+            headerText: 'Here is your code for your next order',
+            discountCode: 'GDmdxxmf3zdP7468',
+            discountAmount: '15% OFF',
+            storeUrl: 'https://groundeddrops.com'
+        };
+
+        const els = {
+            headerText: document.getElementById('headerText'),
+            discountCode: document.getElementById('discountCode'),
+            discountAmount: document.getElementById('discountAmount'),
+            expiryDate: document.getElementById('expiryDate'),
+            storeUrl: document.getElementById('storeUrl'),
+            previewHeader: document.getElementById('previewHeader'),
+            previewDiscount: document.getElementById('previewDiscount'),
+            previewCode: document.getElementById('previewCode'),
+            previewExpiry: document.getElementById('previewExpiry'),
+            qrImage: document.getElementById('qrImage'),
+            qrUrlPreview: document.getElementById('qrUrlPreview')
+        };
+
+        // Shopify "share discount" URL: opens the store with the code applied.
+        function qrUrl() {
+            const base = (els.storeUrl.value || DEFAULTS.storeUrl).replace(/\/+$/, '');
+            const code = encodeURIComponent(els.discountCode.value.trim() || DEFAULTS.discountCode);
+            return base + '/discount/' + code;
+        }
+
+        let qrTimer = null;
+        function update() {
+            els.previewHeader.textContent = els.headerText.value || 'Enter text above...';
+            els.previewDiscount.textContent = els.discountAmount.value || DEFAULTS.discountAmount;
+            els.previewCode.textContent = els.discountCode.value.trim() || DEFAULTS.discountCode;
+            if (els.expiryDate.value) {
+                const d = new Date(els.expiryDate.value + 'T00:00:00');
+                els.previewExpiry.textContent = 'Exp: ' + (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+            } else {
+                els.previewExpiry.textContent = '';
+            }
+            const url = qrUrl();
+            els.qrUrlPreview.textContent = url;
+            // Debounce QR regeneration while typing.
+            clearTimeout(qrTimer);
+            qrTimer = setTimeout(function () {
+                els.qrImage.src = '/qr?data=' + encodeURIComponent(url);
+            }, 300);
+        }
+
+        function resetText() {
+            els.headerText.value = DEFAULTS.headerText;
+            els.discountCode.value = DEFAULTS.discountCode;
+            els.discountAmount.value = DEFAULTS.discountAmount;
+            els.storeUrl.value = DEFAULTS.storeUrl;
+            els.expiryDate.value = '';
+            update();
+        }
+
+        ['headerText', 'discountCode', 'discountAmount', 'expiryDate', 'storeUrl'].forEach(function (id) {
+            els[id].addEventListener('input', update);
+        });
+        update();
+    </script>
+</body>
+</html>

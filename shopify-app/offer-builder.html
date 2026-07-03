@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gift Offers — Offer Builder</title>
+<style>
+  :root {
+    --accent: #1a7f37;
+    --bg: #f6f7f6;
+    --card: #ffffff;
+    --text: #1c1f1d;
+    --muted: #66706a;
+    --border: #dde2df;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.45;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 28px 16px 80px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 14px; }
+  label { display: block; font-size: 12.5px; font-weight: 600; margin: 12px 0 4px; }
+  label .hint { font-weight: 400; color: var(--muted); }
+  input[type=text], input[type=number], input[type=datetime-local], select {
+    width: 100%;
+    padding: 9px 10px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    font-size: 14px;
+    background: #fff;
+    color: var(--text);
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  .type-picker { display: flex; gap: 8px; margin-bottom: 6px; }
+  .type-picker button {
+    flex: 1;
+    padding: 10px 6px;
+    border: 1.5px solid var(--border);
+    background: #fff;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    color: var(--text);
+  }
+  .type-picker button.active { border-color: var(--accent); background: #eef7f0; }
+  .type-desc { font-size: 12px; color: var(--muted); min-height: 32px; margin: 6px 0 2px; }
+  fieldset { border: none; padding: 0; margin: 0; }
+  .gifts-list .gift-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .gifts-list .gift-row input { flex: 1; }
+  .gifts-list .gift-row .var { max-width: 130px; }
+  .icon-btn {
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 7px;
+    width: 34px; height: 34px;
+    cursor: pointer;
+    font-size: 15px;
+    flex: 0 0 auto;
+  }
+  .btn {
+    display: inline-block;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 11px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-top: 16px;
+  }
+  .btn.secondary { background: #fff; color: var(--text); border: 1px solid var(--border); }
+  .btn:hover { filter: brightness(1.05); }
+  .offer-list { list-style: none; padding: 0; margin: 0 0 10px; }
+  .offer-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 9px 12px;
+    margin-bottom: 8px;
+    font-size: 13.5px;
+    background: #fff;
+  }
+  .offer-list .meta { color: var(--muted); font-size: 12px; }
+  .offer-list button { border: none; background: none; color: #b3261e; cursor: pointer; font-size: 13px; font-weight: 600; }
+  pre {
+    background: #101413;
+    color: #d9e5dd;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 12.5px;
+    overflow: auto;
+    max-height: 420px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .warnings { margin: 10px 0 0; padding: 0; list-style: none; }
+  .warnings li {
+    background: #fdf2e3;
+    border: 1px solid #f0d8ae;
+    border-radius: 7px;
+    padding: 8px 10px;
+    font-size: 12.5px;
+    margin-bottom: 6px;
+  }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+  details { margin-top: 20px; font-size: 13.5px; }
+  details summary { cursor: pointer; font-weight: 600; }
+  details .card { margin-top: 10px; }
+  code { background: #eef1ef; border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+  .copied { color: var(--accent); font-size: 13px; margin-left: 10px; font-weight: 600; }
+  .adv-toggle { font-size: 12.5px; color: var(--muted); cursor: pointer; margin-top: 14px; display: inline-block; text-decoration: underline; background: none; border: none; padding: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🎁 Gift Offers — Offer Builder</h1>
+  <p class="sub">Build your offers here, then copy the JSON into <strong>Theme editor → App embeds → Gift Offers → Offers JSON</strong>. No coding needed.</p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>1 · Create an offer</h2>
+
+      <div class="type-picker" role="tablist">
+        <button type="button" data-type="auto" class="active">Free gift<br>with purchase</button>
+        <button type="button" data-type="slider">Customer<br>picks a gift</button>
+        <button type="button" data-type="bogo">BOGO<br>(Buy X get Y)</button>
+      </div>
+      <div class="type-desc" id="typeDesc"></div>
+
+      <label>Offer name <span class="hint">— shown to customers as the slider headline (for “customer picks” offers)</span></label>
+      <input type="text" id="offerName" placeholder="You unlocked a free gift — pick one!">
+
+      <fieldset id="fldSpend">
+        <label>Minimum spend <span class="hint">— in dollars, gifts excluded</span></label>
+        <input type="number" id="minSpend" min="0" step="0.01" placeholder="50">
+      </fieldset>
+
+      <fieldset id="fldBuy" hidden>
+        <div class="row">
+          <div>
+            <label id="buyLabel">Customer buys — product handle <span class="hint">(from the product URL)</span></label>
+            <input type="text" id="buyHandle" placeholder="ground-coffee">
+          </div>
+          <div style="max-width:110px">
+            <label>Qty</label>
+            <input type="number" id="buyQty" min="1" step="1" value="2">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset id="fldGift">
+        <div class="row">
+          <div>
+            <label>Gift — product handle</label>
+            <input type="text" id="giftHandle" placeholder="sample-pack">
+          </div>
+          <div style="max-width:110px">
+            <label>Qty</label>
+            <input type="number" id="giftQty" min="1" step="1" value="1">
+          </div>
+        </div>
+      </fieldset>
+
+      <fieldset id="fldGifts" hidden>
+        <label>Gift choices <span class="hint">— one product handle per row; variant ID optional</span></label>
+        <div class="gifts-list" id="giftsList"></div>
+        <button type="button" class="icon-btn" id="addGiftRow" title="Add another gift choice">＋</button>
+      </fieldset>
+
+      <button type="button" class="adv-toggle" id="advToggle">Show advanced options</button>
+      <fieldset id="fldAdvanced" hidden>
+        <div class="row">
+          <div>
+            <label>Starts at <span class="hint">(optional)</span></label>
+            <input type="datetime-local" id="startsAt">
+          </div>
+          <div>
+            <label>Ends at <span class="hint">(optional)</span></label>
+            <input type="datetime-local" id="endsAt">
+          </div>
+        </div>
+        <label>Gift variant ID <span class="hint">(optional — only if the gift has multiple variants)</span></label>
+        <input type="number" id="giftVariantId" placeholder="41234567890123">
+      </fieldset>
+
+      <button type="button" class="btn" id="addOffer">Add offer ↓</button>
+    </div>
+
+    <div class="card">
+      <h2>2 · Your offers</h2>
+      <ul class="offer-list" id="offerList"></ul>
+      <div class="empty" id="emptyNote">No offers yet — create one on the left, or import below.</div>
+
+      <h2 style="margin-top:22px">3 · Copy into the theme editor</h2>
+      <pre id="jsonOut">[]</pre>
+      <ul class="warnings" id="warnings"></ul>
+      <button type="button" class="btn" id="copyBtn">Copy JSON</button><span class="copied" id="copiedNote" hidden>Copied ✓</span>
+      <button type="button" class="btn secondary" id="importBtn">Import existing JSON</button>
+      <button type="button" class="btn secondary" id="clearBtn">Start over</button>
+      <div class="empty" style="margin-top:8px">Your offers are saved in this browser automatically.</div>
+    </div>
+  </div>
+
+  <details>
+    <summary>Where do I find a product “handle” or variant ID?</summary>
+    <div class="card">
+      <p><strong>Product handle:</strong> open the product on your storefront — the last part of the URL. For
+      <code>groundeddrops.com/products/ground-coffee</code> the handle is <code>ground-coffee</code>.</p>
+      <p><strong>Variant ID</strong> (only needed when a gift product has multiple variants and you want a specific one):
+      open <code>yourstore.com/products/&lt;handle&gt;.js</code> in a browser tab — each entry under <code>variants</code>
+      has an <code>id</code>. Alternatively in Shopify admin, open the product, click the variant — the number at the end
+      of the URL is the variant ID.</p>
+      <p><strong>Remember:</strong> every offer here also needs its matching <em>native discount</em> so the gift is
+      actually free — see SETUP.md, Part B.</p>
+    </div>
+  </details>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var offers = [];
+  var currentType = 'auto';
+
+  var DESCRIPTIONS = {
+    auto: 'A gift is added to the cart automatically when the shopper spends enough (and/or buys a required product).',
+    slider: 'When the cart qualifies, shoppers see a slider and pick ONE gift from your list.',
+    bogo: 'Buy X of a product, get Y free — e.g. buy 2 bags of coffee, get 1 free. The free unit is added automatically.'
+  };
+
+  function $(id) { return document.getElementById(id); }
+
+  function slugify(name, fallback) {
+    var s = String(name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return s || fallback;
+  }
+
+  function setType(type) {
+    currentType = type;
+    document.querySelectorAll('.type-picker button').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.type === type);
+    });
+    $('typeDesc').textContent = DESCRIPTIONS[type];
+    $('fldSpend').hidden = (type === 'bogo');
+    $('fldBuy').hidden = (type === 'slider'); // bogo: required; auto: optional
+    $('buyLabel').innerHTML = type === 'bogo'
+      ? 'Customer buys — product handle <span class="hint">(from the product URL)</span>'
+      : 'Customer must also buy — product handle <span class="hint">(optional)</span>';
+    $('fldGift').hidden = (type === 'slider');
+    $('fldGifts').hidden = (type !== 'slider');
+    if (type === 'slider' && !$('giftsList').children.length) addGiftRow();
+  }
+
+  function addGiftRow() {
+    var row = document.createElement('div');
+    row.className = 'gift-row';
+    row.innerHTML =
+      '<input type="text" class="g-handle" placeholder="product-handle">' +
+      '<input type="number" class="g-variant var" placeholder="variant ID (opt.)">' +
+      '<button type="button" class="icon-btn" title="Remove">−</button>';
+    row.querySelector('button').addEventListener('click', function () { row.remove(); });
+    $('giftsList').appendChild(row);
+  }
+
+  function buildOffer() {
+    var name = $('offerName').value.trim();
+    var o = { id: slugify(name, currentType + '-' + (offers.length + 1)), type: currentType };
+    if (name) o.title = name;
+
+    var minSpend = parseFloat($('minSpend').value);
+    if (currentType !== 'bogo' && isFinite(minSpend) && minSpend > 0) o.minSpend = minSpend;
+
+    if (currentType !== 'slider') {
+      var buyHandle = $('buyHandle').value.trim();
+      var buyQty = parseInt($('buyQty').value, 10) || 1;
+      if (buyHandle) o.buy = { product: buyHandle, quantity: buyQty };
+    }
+
+    if (currentType === 'slider') {
+      o.gifts = [];
+      document.querySelectorAll('#giftsList .gift-row').forEach(function (row) {
+        var handle = row.querySelector('.g-handle').value.trim();
+        var variant = parseInt(row.querySelector('.g-variant').value, 10);
+        if (!handle && !variant) return;
+        var g = {};
+        if (handle) g.product = handle;
+        if (variant) g.variantId = variant;
+        o.gifts.push(g);
+      });
+    } else {
+      var giftHandle = $('giftHandle').value.trim();
+      var giftQty = parseInt($('giftQty').value, 10) || 1;
+      var giftVariant = parseInt($('giftVariantId').value, 10);
+      var gift = {};
+      if (giftHandle) gift.product = giftHandle;
+      if (giftVariant) gift.variantId = giftVariant;
+      if (giftQty > 1) gift.quantity = giftQty;
+      if (giftHandle || giftVariant) o[currentType === 'bogo' ? 'get' : 'gift'] = gift;
+    }
+
+    if ($('startsAt').value) o.startsAt = new Date($('startsAt').value).toISOString();
+    if ($('endsAt').value) o.endsAt = new Date($('endsAt').value).toISOString();
+    return o;
+  }
+
+  function validate(offer) {
+    var errors = [];
+    var warnings = [];
+    if (!offer.minSpend && !offer.buy) {
+      errors.push('“' + offer.id + '”: needs a minimum spend or a “customer buys” rule.');
+    }
+    var gifts = offer.gifts || [offer.gift || offer.get].filter(Boolean);
+    if (!gifts || !gifts.length) {
+      errors.push('“' + offer.id + '”: needs at least one gift product.');
+    } else {
+      gifts.forEach(function (g) {
+        if (!g.product && !g.variantId) errors.push('“' + offer.id + '”: a gift is missing its product handle.');
+      });
+    }
+    if (offers.some(function (x) { return x.id === offer.id; })) {
+      errors.push('“' + offer.id + '”: an offer with this id already exists — pick a different name.');
+    }
+    if (offer.minSpend && offer.minSpend >= 1000) {
+      warnings.push('“' + offer.id + '”: minimum spend is $' + offer.minSpend + ' — heads-up that minSpend is in dollars, not cents.');
+    }
+    return { errors: errors, warnings: warnings };
+  }
+
+  function describe(o) {
+    var parts = [];
+    if (o.minSpend) parts.push('spend $' + o.minSpend + '+');
+    if (o.buy) parts.push('buy ' + o.buy.quantity + ' × ' + o.buy.product);
+    var action = o.gifts ? 'choose from ' + o.gifts.length + ' gifts'
+      : 'get ' + (((o.gift || o.get) && ((o.gift || o.get).product || 'variant ' + (o.gift || o.get).variantId)) || '?');
+    return parts.join(' + ') + ' → ' + action;
+  }
+
+  var STORAGE_KEY = 'gdOfferBuilder';
+
+  function persist() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(offers)); } catch (e) { /* private mode */ }
+  }
+  function restore() {
+    try {
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+      if (Array.isArray(saved)) offers = saved;
+    } catch (e) { /* corrupted — start fresh */ }
+  }
+
+  // Load an offer back into the form for editing.
+  function editOffer(o, index) {
+    offers.splice(index, 1);
+    var type = o.type === 'bogo' || (o.buy && !o.minSpend && !o.gifts) ? 'bogo' : (o.gifts ? 'slider' : 'auto');
+    setType(o.type === 'slider' ? 'slider' : (o.type === 'bogo' ? 'bogo' : type));
+    $('offerName').value = o.title || '';
+    $('minSpend').value = o.minSpend != null ? o.minSpend : '';
+    $('buyHandle').value = (o.buy && (Array.isArray(o.buy.product) ? o.buy.product[0] : o.buy.product)) || '';
+    $('buyQty').value = (o.buy && o.buy.quantity) || 2;
+    var single = o.gift || o.get || {};
+    $('giftHandle').value = single.product || '';
+    $('giftQty').value = single.quantity || 1;
+    $('giftVariantId').value = single.variantId || '';
+    $('giftsList').innerHTML = '';
+    (o.gifts || []).forEach(function (g) {
+      addGiftRow();
+      var row = $('giftsList').lastElementChild;
+      row.querySelector('.g-handle').value = g.product || '';
+      row.querySelector('.g-variant').value = g.variantId || '';
+    });
+    $('startsAt').value = o.startsAt ? o.startsAt.slice(0, 16) : '';
+    $('endsAt').value = o.endsAt ? o.endsAt.slice(0, 16) : '';
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function render() {
+    var list = $('offerList');
+    list.innerHTML = '';
+    offers.forEach(function (o, i) {
+      var li = document.createElement('li');
+      var left = document.createElement('div');
+      var strong = document.createElement('strong');
+      strong.textContent = o.title || o.id;
+      var meta = document.createElement('div');
+      meta.className = 'meta';
+      meta.textContent = o.type + ' · ' + describe(o);
+      left.appendChild(strong); left.appendChild(meta);
+      var actions = document.createElement('div');
+      var edit = document.createElement('button');
+      edit.textContent = 'Edit';
+      edit.style.color = 'var(--accent)';
+      edit.addEventListener('click', function () { editOffer(o, i); });
+      var del = document.createElement('button');
+      del.textContent = 'Remove';
+      del.addEventListener('click', function () { offers.splice(i, 1); render(); });
+      actions.appendChild(edit); actions.appendChild(del);
+      li.appendChild(left); li.appendChild(actions);
+      list.appendChild(li);
+    });
+    $('emptyNote').hidden = offers.length > 0;
+    $('jsonOut').textContent = JSON.stringify(offers, null, 2);
+    persist();
+  }
+
+  function showWarnings(problems) {
+    var ul = $('warnings');
+    ul.innerHTML = '';
+    problems.forEach(function (p) {
+      var li = document.createElement('li');
+      li.textContent = p;
+      ul.appendChild(li);
+    });
+  }
+
+  document.querySelectorAll('.type-picker button').forEach(function (b) {
+    b.addEventListener('click', function () { setType(b.dataset.type); });
+  });
+  $('addGiftRow').addEventListener('click', addGiftRow);
+  $('advToggle').addEventListener('click', function () {
+    var f = $('fldAdvanced');
+    f.hidden = !f.hidden;
+    this.textContent = f.hidden ? 'Show advanced options' : 'Hide advanced options';
+  });
+  $('addOffer').addEventListener('click', function () {
+    var offer = buildOffer();
+    var result = validate(offer);
+    showWarnings(result.errors.concat(result.warnings));
+    if (result.errors.length) return;
+    if (result.warnings.length && !confirm(result.warnings.join('\n') + '\n\nAdd it anyway?')) return;
+    offers.push(offer);
+    render();
+    $('offerName').value = '';
+    showWarnings([]);
+  });
+  $('importBtn').addEventListener('click', function () {
+    var raw = prompt('Paste your current Offers JSON (from the theme editor setting):');
+    if (raw == null || !raw.trim()) return;
+    try {
+      var parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) throw new Error('expected a JSON array');
+      offers = parsed;
+      render();
+      showWarnings([]);
+    } catch (e) {
+      showWarnings(['Could not read that JSON: ' + e.message]);
+    }
+  });
+  $('copyBtn').addEventListener('click', function () {
+    var text = JSON.stringify(offers, null, 2);
+    (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+      $('copiedNote').hidden = false;
+      setTimeout(function () { $('copiedNote').hidden = true; }, 2000);
+    }).catch(function () {
+      // Fallback: select the <pre> for manual copy
+      var range = document.createRange();
+      range.selectNodeContents($('jsonOut'));
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    });
+  });
+  $('clearBtn').addEventListener('click', function () {
+    if (offers.length && !confirm('Remove all offers?')) return;
+    offers = [];
+    showWarnings([]);
+    render();
+  });
+
+  setType('auto');
+  restore();
+  render();
+})();
+</script>
+</body>
+</html>

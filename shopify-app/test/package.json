@@ -1,0 +1,11 @@
+{
+  "name": "gift-offers-tests",
+  "private": true,
+  "description": "Headless browser tests for the gift-offers theme app extension",
+  "scripts": {
+    "test": "node run-tests.js"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.49.0"
+  }
+}

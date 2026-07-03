@@ -1,9 +1,6 @@
-api_version = "2024-10"
-
 # Theme App Extension for Grounded Drops gift offers.
-# This extension contains NO server code — it ships static assets + a Liquid
-# "app embed" block that Shopify serves from its own CDN. Hosting cost: $0.
-[[extensions]]
+# No server code — Shopify serves the Liquid block + assets from its CDN ($0 hosting).
+# (Theme extensions don't take an api_version; the official scaffold is name/type only.)
 type = "theme"
 name = "Grounded Drops Gift Offers"
 handle = "gift-offers"

@@ -1,10 +1,12 @@
 {% comment %}
   Grounded Drops — Gift Offers app embed block.
 
-  This is an "app embed" block: merchants turn it on from
-  Online Store → Themes → Customize → App embeds. It injects the gift widget
-  on every storefront page. All offer rules are configured in the "Offers JSON"
-  setting below (see SETUP.md for the schema and examples).
+  Merchants enable this from Online Store → Themes → Customize → App embeds.
+  Offer rules live in the "Offers JSON" setting — use offer-builder.html in the
+  app repo to generate them, or see SETUP.md for the schema.
+
+  The widget only ADDS/REMOVES gift lines and renders UI. Making gifts free is
+  handled by native Shopify automatic discounts (SETUP.md, Part B).
 {% endcomment %}
 
 {% if block.settings.enabled %}
@@ -12,15 +14,29 @@
     window.GroundedGiftOffers = {
       moneyFormat: {{ shop.money_format | json }},
       currency: {{ cart.currency.iso_code | json }},
-      sliderTitle: {{ block.settings.slider_title | json }},
-      sliderSubtitle: {{ block.settings.slider_subtitle | json }},
+      shopCurrency: {{ shop.currency | json }},
+      routesRoot: {{ routes.root_url | json }},
       position: {{ block.settings.position | json }},
+      refresh: {{ block.settings.refresh_strategy | json }},
+      showTeaser: {{ block.settings.show_teaser | json }},
       debug: {{ block.settings.debug | json }},
-      // Offers is a JSON array — parsed defensively in the JS.
-      offersRaw: {{ block.settings.offers_json | json }}
+      offersRaw: {{ block.settings.offers_json | json }},
+      strings: {
+        sliderTitle: {{ block.settings.slider_title | json }},
+        sliderSubtitle: {{ block.settings.slider_subtitle | json }},
+        teaserText: {{ block.settings.teaser_text | json }},
+        unlockedText: {{ block.settings.unlocked_text | json }},
+        addLabel: {{ block.settings.add_label | json }},
+        addedLabel: {{ block.settings.added_label | json }},
+        chipLabel: {{ block.settings.chip_label | json }},
+        freeLabel: {{ block.settings.free_label | json }}
+      }
     };
   </script>
   {{ 'gift-offers.css' | asset_url | stylesheet_tag }}
+  <style>
+    #gd-gift-widget { --gd-accent: {{ block.settings.accent_color | default: '#1a7f37' }}; }
+  </style>
   <script src="{{ 'gift-offers.js' | asset_url }}" defer></script>
 {% endif %}
 
@@ -41,7 +57,7 @@
     },
     {
       "type": "paragraph",
-      "content": "Paste your offers as a JSON array. See SETUP.md in the app repo for the full schema and examples."
+      "content": "Paste a JSON array of offers. Use the offer builder (offer-builder.html in the app repo) to generate it without writing JSON by hand."
     },
     {
       "type": "textarea",
@@ -51,29 +67,98 @@
     },
     {
       "type": "header",
-      "content": "Gift slider appearance"
+      "content": "Appearance"
     },
     {
-      "type": "text",
-      "id": "slider_title",
-      "label": "Slider title",
-      "default": "🎁 Pick your free gift!"
-    },
-    {
-      "type": "text",
-      "id": "slider_subtitle",
-      "label": "Slider subtitle",
-      "default": "Added free at checkout"
+      "type": "color",
+      "id": "accent_color",
+      "label": "Accent color",
+      "default": "#1a7f37"
     },
     {
       "type": "select",
       "id": "position",
-      "label": "Slider position",
+      "label": "Widget position",
       "options": [
         { "value": "bottom", "label": "Bottom of screen" },
         { "value": "top", "label": "Top of screen" }
       ],
       "default": "bottom"
+    },
+    {
+      "type": "checkbox",
+      "id": "show_teaser",
+      "label": "Show \"spend more to unlock\" progress nudge",
+      "default": true
+    },
+    {
+      "type": "header",
+      "content": "Text"
+    },
+    {
+      "type": "text",
+      "id": "slider_title",
+      "label": "Gift slider title",
+      "default": "Pick your free gift"
+    },
+    {
+      "type": "text",
+      "id": "slider_subtitle",
+      "label": "Gift slider subtitle",
+      "default": "Added free at checkout"
+    },
+    {
+      "type": "text",
+      "id": "teaser_text",
+      "label": "Progress nudge text ({amount} = remaining)",
+      "default": "Spend {amount} more to unlock a free gift 🎁"
+    },
+    {
+      "type": "text",
+      "id": "unlocked_text",
+      "label": "Unlocked message",
+      "default": "🎁 Free gift unlocked!"
+    },
+    {
+      "type": "text",
+      "id": "add_label",
+      "label": "Add button",
+      "default": "Add free gift"
+    },
+    {
+      "type": "text",
+      "id": "added_label",
+      "label": "Added button",
+      "default": "✓ Added"
+    },
+    {
+      "type": "text",
+      "id": "chip_label",
+      "label": "Reopen chip",
+      "default": "🎁 Free gift available"
+    },
+    {
+      "type": "text",
+      "id": "free_label",
+      "label": "Gift price label",
+      "default": "FREE"
+    },
+    {
+      "type": "header",
+      "content": "Advanced"
+    },
+    {
+      "type": "select",
+      "id": "refresh_strategy",
+      "label": "Cart refresh strategy",
+      "info": "How the theme's cart drawer is updated after a gift is added. 'Auto' re-renders cart sections in place and works with most themes.",
+      "options": [
+        { "value": "auto", "label": "Auto (sections + events)" },
+        { "value": "events", "label": "Events only" },
+        { "value": "reload", "label": "Reload page" },
+        { "value": "none", "label": "None" }
+      ],
+      "default": "auto"
     },
     {
       "type": "checkbox",

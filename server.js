@@ -40,6 +40,18 @@ const mailer = process.env.SMTP_HOST
 
 app.use(cors());
 
+// Allow the entry page to be embedded as an <iframe> in the Shopify storefront.
+// When SHOP_DOMAIN is set we restrict framing to that store (and self);
+// otherwise framing is left open for local/dev use.
+const SHOP_DOMAIN = process.env.SHOP_DOMAIN || '';
+app.use((req, res, next) => {
+  res.set('X-Content-Type-Options', 'nosniff');
+  if (SHOP_DOMAIN) {
+    res.set('Content-Security-Policy', `frame-ancestors 'self' https://${SHOP_DOMAIN} https://*.myshopify.com`);
+  }
+  next();
+});
+
 // ---------------------------------------------------------------------------
 // Shopify webhook — must read the RAW body to verify the HMAC, so it is
 // registered before the JSON body parser.

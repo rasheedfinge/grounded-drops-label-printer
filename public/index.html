@@ -45,6 +45,10 @@
     .winner-card .who { font-weight:700; font-size:16px; }
     .winner-card .what { color:var(--muted); font-size:13px; margin-top:2px; }
     .winner-card.latest { border-color:var(--accent); background:#181d12; }
+    /* embed mode — blends into a Shopify store page (transparent, tighter) */
+    body.embed { background:transparent; }
+    body.embed .wrap { padding:8px 4px 16px; max-width:none; }
+    body.embed .brand { display:none; }
   </style>
 </head>
 <body>
@@ -105,6 +109,17 @@
     const el = (id) => document.getElementById(id);
 
     if (ref) el('refBadge').style.display = 'block';
+
+    // Embed mode: when loaded inside an <iframe> on the store, blend in and
+    // keep the parent's iframe sized to the content (no inner scrollbar).
+    const embedded = params.has('embed') || window.self !== window.top;
+    if (embedded) {
+      document.body.classList.add('embed');
+      const postHeight = () =>
+        parent.postMessage({ type: 'gd-giveaway-height', height: document.body.scrollHeight }, '*');
+      new ResizeObserver(postHeight).observe(document.body);
+      window.addEventListener('load', postHeight);
+    }
 
     async function loadCurrent() {
       try {

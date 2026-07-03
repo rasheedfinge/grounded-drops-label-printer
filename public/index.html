@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grounded Drops — Monthly Giveaway</title>
+  <style>
+    :root { --bg:#10100f; --card:#1c1b19; --line:#2e2c29; --accent:#7cb342; --accent-d:#5a9024; --text:#f4f1ea; --muted:#a39e94; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: 'Segoe UI', system-ui, sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:560px; margin:0 auto; padding:32px 20px 64px; }
+    .brand { text-align:center; letter-spacing:3px; font-size:13px; color:var(--muted); text-transform:uppercase; margin-bottom:24px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:28px; }
+    h1 { margin:0 0 6px; font-size:26px; }
+    .prize { color:var(--accent); font-weight:700; font-size:18px; margin:4px 0 14px; }
+    p.desc { color:var(--muted); line-height:1.5; margin:0 0 22px; }
+    label { display:block; font-size:13px; color:var(--muted); margin:14px 0 6px; }
+    input { width:100%; padding:13px; border-radius:9px; border:1px solid var(--line); background:#141312; color:var(--text); font-size:16px; }
+    input:focus { outline:none; border-color:var(--accent); }
+    button { width:100%; margin-top:22px; padding:14px; border:none; border-radius:9px; background:var(--accent); color:#0c1407; font-weight:700; font-size:16px; cursor:pointer; transition:background .2s; }
+    button:hover { background:var(--accent-d); }
+    button:disabled { opacity:.6; cursor:not-allowed; }
+    .msg { margin-top:16px; padding:12px 14px; border-radius:9px; font-size:14px; display:none; }
+    .msg.err { background:#3a1c1c; color:#ffb4b4; display:block; }
+    .ref-badge { font-size:12px; color:var(--accent); text-align:center; margin-bottom:14px; display:none; }
+    /* success state */
+    .success { display:none; text-align:center; }
+    .success h2 { margin:0 0 4px; }
+    .tickets { font-size:48px; font-weight:800; color:var(--accent); margin:10px 0 2px; }
+    .tickets-label { color:var(--muted); font-size:13px; text-transform:uppercase; letter-spacing:2px; }
+    .share-box { background:#141312; border:1px dashed var(--line); border-radius:10px; padding:16px; margin-top:22px; }
+    .share-box h3 { margin:0 0 8px; font-size:15px; }
+    .share-box p { color:var(--muted); font-size:13px; margin:0 0 12px; }
+    .share-url { display:flex; gap:8px; }
+    .share-url input { font-size:13px; }
+    .copy-btn { width:auto; margin:0; padding:0 16px; white-space:nowrap; }
+    .qr { margin:16px auto 0; display:block; border-radius:8px; }
+    .closed { text-align:center; color:var(--muted); padding:20px 0; }
+    .footer { text-align:center; color:var(--muted); font-size:12px; margin-top:28px; }
+    /* winners wall */
+    .winners { margin-top:24px; }
+    .winners h2 { text-align:center; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:2px; margin:0 0 14px; }
+    .winner-card { display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+    .winner-card .trophy { font-size:24px; }
+    .winner-card .who { font-weight:700; font-size:16px; }
+    .winner-card .what { color:var(--muted); font-size:13px; margin-top:2px; }
+    .winner-card.latest { border-color:var(--accent); background:#181d12; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">Grounded Drops</div>
+    <div class="card">
+      <div class="ref-badge" id="refBadge">🎉 A friend invited you — enter to give them a bonus entry!</div>
+
+      <!-- Entry form -->
+      <div id="formView">
+        <h1 id="gTitle">Monthly Giveaway</h1>
+        <div class="prize" id="gPrize"></div>
+        <p class="desc" id="gDesc">Enter your email for a chance to win this month's drop.</p>
+
+        <form id="entryForm">
+          <label for="name">Name (optional)</label>
+          <input id="name" type="text" autocomplete="name" placeholder="Your name" />
+          <label for="email">Email</label>
+          <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+          <button type="submit" id="submitBtn">Enter the Giveaway</button>
+        </form>
+        <div class="msg err" id="errMsg"></div>
+      </div>
+
+      <!-- Closed state -->
+      <div class="closed" id="closedView" style="display:none">
+        <h1>No giveaway open right now</h1>
+        <p class="desc">Check back soon — we run a new drop every month. 🌱</p>
+      </div>
+
+      <!-- Success state -->
+      <div class="success" id="successView">
+        <h2 id="successHeading">You're in! 🌿</h2>
+        <div class="tickets" id="ticketCount">1</div>
+        <div class="tickets-label">entries</div>
+        <div class="share-box">
+          <h3>Want more entries?</h3>
+          <p>Share your link. Every friend who joins gives you a bonus entry.</p>
+          <div class="share-url">
+            <input id="shareUrl" type="text" readonly />
+            <button class="copy-btn" id="copyBtn" type="button">Copy</button>
+          </div>
+          <img class="qr" id="shareQr" alt="Share QR code" width="160" height="160" />
+        </div>
+      </div>
+    </div>
+    <div class="winners" id="winnersWall" style="display:none">
+      <h2>🏆 Past Winners</h2>
+      <div id="winnersList"></div>
+    </div>
+
+    <div class="footer">One entry per email per giveaway. Winners drawn monthly.</div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const ref = params.get('ref');
+    const el = (id) => document.getElementById(id);
+
+    if (ref) el('refBadge').style.display = 'block';
+
+    async function loadCurrent() {
+      try {
+        const { giveaway } = await (await fetch('/api/current')).json();
+        if (!giveaway) {
+          el('formView').style.display = 'none';
+          el('closedView').style.display = 'block';
+          return;
+        }
+        el('gTitle').textContent = giveaway.title;
+        el('gPrize').textContent = giveaway.prize || '';
+        if (giveaway.description) el('gDesc').textContent = giveaway.description;
+      } catch {
+        el('errMsg').textContent = 'Could not load the giveaway. Please refresh.';
+        el('errMsg').classList.add('err');
+      }
+    }
+
+    el('entryForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = el('submitBtn');
+      const err = el('errMsg');
+      err.style.display = 'none';
+      btn.disabled = true;
+      btn.textContent = 'Entering…';
+      try {
+        const res = await fetch('/api/enter', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: el('name').value, email: el('email').value, ref }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Something went wrong.');
+
+        el('formView').style.display = 'none';
+        el('refBadge').style.display = 'none';
+        el('successView').style.display = 'block';
+        el('successHeading').textContent = data.alreadyEntered ? "You're already entered! 🌿" : "You're in! 🌿";
+        el('ticketCount').textContent = data.tickets;
+        el('shareUrl').value = data.shareUrl;
+        if (data.shareQr) el('shareQr').src = data.shareQr;
+        else el('shareQr').style.display = 'none';
+      } catch (e2) {
+        err.textContent = e2.message;
+        err.classList.add('err');
+        err.style.display = 'block';
+        btn.disabled = false;
+        btn.textContent = 'Enter the Giveaway';
+      }
+    });
+
+    el('copyBtn').addEventListener('click', async () => {
+      const input = el('shareUrl');
+      try {
+        await navigator.clipboard.writeText(input.value);
+      } catch {
+        input.select();
+        document.execCommand('copy');
+      }
+      el('copyBtn').textContent = 'Copied!';
+      setTimeout(() => (el('copyBtn').textContent = 'Copy'), 1500);
+    });
+
+    async function loadWinners() {
+      try {
+        const { winners } = await (await fetch('/api/winners')).json();
+        if (!winners || !winners.length) return;
+        el('winnersWall').style.display = 'block';
+        el('winnersList').innerHTML = winners
+          .map((w, i) => `
+            <div class="winner-card${i === 0 ? ' latest' : ''}">
+              <div class="trophy">${i === 0 ? '🏆' : '🎉'}</div>
+              <div>
+                <div class="who">${escapeHtml(w.winner)}</div>
+                <div class="what">won ${escapeHtml(w.prize || w.title)} · ${escapeHtml(w.month)}</div>
+              </div>
+            </div>`)
+          .join('');
+      } catch { /* winners wall is optional */ }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
+    loadCurrent();
+    loadWinners();
+  </script>
+</body>
+</html>

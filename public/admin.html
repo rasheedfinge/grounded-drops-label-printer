@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grounded Drops — Giveaway Admin</title>
+  <style>
+    :root { --bg:#10100f; --card:#1c1b19; --line:#2e2c29; --accent:#7cb342; --accent-d:#5a9024; --text:#f4f1ea; --muted:#a39e94; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family:'Segoe UI',system-ui,sans-serif; background:var(--bg); color:var(--text); }
+    .wrap { max-width:1000px; margin:0 auto; padding:28px 20px 64px; }
+    h1 { font-size:22px; margin:0 0 6px; }
+    h2 { font-size:16px; margin:0 0 14px; color:var(--muted); text-transform:uppercase; letter-spacing:1px; }
+    .grid { display:grid; grid-template-columns:340px 1fr; gap:20px; align-items:start; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; }
+    label { display:block; font-size:12px; color:var(--muted); margin:12px 0 5px; }
+    input, textarea { width:100%; padding:10px; border-radius:8px; border:1px solid var(--line); background:#141312; color:var(--text); font-size:14px; }
+    textarea { resize:vertical; min-height:60px; font-family:inherit; }
+    button { padding:10px 14px; border:none; border-radius:8px; background:var(--accent); color:#0c1407; font-weight:700; cursor:pointer; font-size:14px; }
+    button:hover { background:var(--accent-d); }
+    button.ghost { background:transparent; border:1px solid var(--line); color:var(--text); }
+    button.ghost:hover { background:#222; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .full { width:100%; margin-top:16px; }
+    .gv-item { padding:12px; border:1px solid var(--line); border-radius:9px; margin-bottom:10px; cursor:pointer; }
+    .gv-item:hover { border-color:var(--accent); }
+    .gv-item.active { border-color:var(--accent); background:#181d12; }
+    .gv-item .t { font-weight:600; }
+    .gv-item .meta { font-size:12px; color:var(--muted); margin-top:3px; }
+    .pill { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px; background:#222; color:var(--muted); }
+    .pill.open { background:#1d2a12; color:var(--accent); }
+    .pill.drawn { background:#2a2212; color:#e0c060; }
+    .pill.closed { background:#222; color:var(--muted); }
+    .pill.sent { background:#1d2a12; color:var(--accent); }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); }
+    th { color:var(--muted); font-weight:600; font-size:12px; }
+    .stat-row { display:flex; gap:24px; margin-bottom:16px; }
+    .stat .n { font-size:30px; font-weight:800; color:var(--accent); }
+    .stat .l { font-size:12px; color:var(--muted); text-transform:uppercase; }
+    .winner { background:#181d12; border:1px solid var(--accent); border-radius:10px; padding:16px; margin-bottom:16px; }
+    .winner .name { font-size:18px; font-weight:700; }
+    .toolbar { display:flex; gap:10px; align-items:center; margin-bottom:16px; flex-wrap:wrap; }
+    .err { color:#ffb4b4; font-size:13px; margin-top:8px; }
+    .ok { color:var(--accent); font-size:13px; margin-top:8px; }
+    .empty { color:var(--muted); padding:20px 0; }
+    .draft { border:1px solid var(--line); border-radius:10px; padding:14px; margin-bottom:14px; background:#141312; }
+    .draft .head { display:flex; align-items:center; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
+    .draft .head .t { font-weight:700; }
+    .draft .actions { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    .draft textarea { min-height:150px; font-size:13px; }
+    .autodraw { font-size:12px; color:var(--muted); margin:0 0 20px; }
+    .autodraw .pill { margin-right:6px; }
+    details.section { margin-top:18px; }
+    details.section summary { cursor:pointer; color:var(--muted); font-size:13px; font-weight:600; text-transform:uppercase; letter-spacing:1px; margin-bottom:10px; }
+    a { color:var(--accent); }
+    @media (max-width:760px){ .grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>🌱 Giveaway Admin</h1>
+    <div class="autodraw" id="autodrawInfo"></div>
+    <div class="grid">
+      <div>
+        <div class="card">
+          <h2>New Giveaway</h2>
+          <form id="newForm">
+            <label>Title</label>
+            <input id="title" placeholder="June Drop Giveaway" required />
+            <label>Prize</label>
+            <input id="prize" placeholder="1 free bag of Grounded Drops" />
+            <label>Period (YYYY-MM)</label>
+            <input id="period" placeholder="2026-06" />
+            <label>Description</label>
+            <textarea id="description" placeholder="Tell entrants what they could win…"></textarea>
+            <button class="full" type="submit">Create Giveaway</button>
+            <div class="err" id="newErr"></div>
+          </form>
+        </div>
+        <div class="card" style="margin-top:20px">
+          <h2>Giveaways</h2>
+          <div id="gvList"><div class="empty">Loading…</div></div>
+          <button class="ghost full" id="cycleBtn" type="button" title="Draws winners for any giveaway whose month has ended, and opens the new month">⟳ Run monthly cycle now</button>
+          <div class="ok" id="cycleMsg"></div>
+        </div>
+      </div>
+
+      <div class="card" id="detail">
+        <div class="empty">Select a giveaway to view entries, drafts, and the winner.</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    let selectedId = null;
+    let autoDrawOn = false;
+    let mailerOn = false;
+
+    async function api(url, opts) {
+      const res = await fetch(url, opts);
+      if (res.status === 401) { location.reload(); return; }
+      const data = res.headers.get('content-type')?.includes('json') ? await res.json() : null;
+      if (!res.ok) throw new Error((data && data.error) || 'Request failed');
+      return data;
+    }
+
+    const jsonReq = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    async function loadList() {
+      const { giveaways, autoDraw, mailerConfigured } = await api('/api/admin/giveaways');
+      autoDrawOn = autoDraw; mailerOn = mailerConfigured;
+      el('autodrawInfo').innerHTML =
+        `<span class="pill ${autoDraw ? 'open' : ''}">auto-draw ${autoDraw ? 'ON' : 'OFF'}</span>` +
+        `<span class="pill ${mailerConfigured ? 'open' : ''}">email sending ${mailerConfigured ? 'ON' : 'OFF (copy drafts manually)'}</span>` +
+        (autoDraw ? ' Winners are drawn automatically when the month ends, and the next giveaway opens itself.' : ' Enable by removing AUTO_DRAW=false.');
+      const list = el('gvList');
+      if (!giveaways.length) { list.innerHTML = '<div class="empty">No giveaways yet.</div>'; return; }
+      list.innerHTML = '';
+      for (const g of giveaways) {
+        const div = document.createElement('div');
+        div.className = 'gv-item' + (g.id === selectedId ? ' active' : '');
+        div.innerHTML = `<div class="t">${escapeHtml(g.title)} <span class="pill ${g.status}">${g.status}</span></div>
+          <div class="meta">${g.period} · ${g.participant_count} entrants · ${g.ticket_count} entries</div>`;
+        div.onclick = () => selectGiveaway(g.id);
+        list.appendChild(div);
+      }
+    }
+
+    function draftCard(d) {
+      const label = d.type === 'announcement' ? '📣 Announcement — goes to the whole entrant list' : '🏆 Winner email — asks them to confirm details';
+      return `
+        <div class="draft" data-id="${d.id}">
+          <div class="head"><span class="t">${label}</span> <span class="pill ${d.status === 'sent' ? 'sent' : ''}">${d.status}${d.sent_at ? ' ' + d.sent_at : ''}</span></div>
+          <label>Subject</label>
+          <input class="d-subject" value="${escapeHtml(d.subject)}" ${d.status === 'sent' ? 'disabled' : ''} />
+          <label>Body</label>
+          <textarea class="d-body" ${d.status === 'sent' ? 'disabled' : ''}>${escapeHtml(d.body)}</textarea>
+          <div class="actions">
+            ${d.status !== 'sent' ? `<button class="ghost d-save" type="button">Save draft</button>
+            <button class="d-send" type="button" ${mailerOn ? '' : 'title="Configure SMTP_HOST in .env to send from the app"'}>Send ${d.type === 'announcement' ? 'to list' : 'to winner'}</button>` : ''}
+            <button class="ghost d-copy" type="button">Copy text</button>
+          </div>
+          <div class="err d-msg"></div>
+        </div>`;
+    }
+
+    async function selectGiveaway(id) {
+      selectedId = id;
+      await loadList();
+      const { giveaway, participants, totals, winner, drafts } = await api('/api/admin/giveaways/' + id);
+      const canDraw = giveaway.status === 'open' && totals.tickets > 0;
+      el('detail').innerHTML = `
+        <div class="toolbar">
+          <h2 style="margin:0">${escapeHtml(giveaway.title)}</h2>
+          <span class="pill ${giveaway.status}">${giveaway.status}</span>
+          <span style="flex:1"></span>
+          ${canDraw ? '<button id="drawBtn">🎲 Draw Winner</button>' : ''}
+          <a href="/api/admin/giveaways/${id}/export.csv"><button class="ghost" type="button">Export CSV</button></a>
+        </div>
+        ${winner ? `<div class="winner"><div style="color:var(--muted);font-size:12px;text-transform:uppercase">Winner</div>
+          <div class="name">${escapeHtml(winner.name || winner.email)}</div>
+          <div style="color:var(--muted);font-size:13px">${escapeHtml(winner.email)} · ${winner.tickets} entries · drawn ${winner.drawn_at}</div>
+          ${winner.discount_code ? `<div style="margin-top:8px;font-size:13px">Prize discount code: <strong>${escapeHtml(winner.discount_code)}</strong></div>` : ''}</div>` : ''}
+        ${drafts && drafts.length ? `<h2>Emails</h2>${drafts.map(draftCard).join('')}` : ''}
+        <div class="stat-row">
+          <div class="stat"><div class="n">${totals.participants}</div><div class="l">Entrants</div></div>
+          <div class="stat"><div class="n">${totals.tickets}</div><div class="l">Total Entries</div></div>
+        </div>
+        ${giveaway.status === 'open' ? `
+        <details class="section">
+          <summary>✏️ Edit title / prize / description</summary>
+          <label>Title</label><input id="editTitle" value="${escapeHtml(giveaway.title)}" />
+          <label>Prize</label><input id="editPrize" value="${escapeHtml(giveaway.prize)}" />
+          <label>Description</label><textarea id="editDesc">${escapeHtml(giveaway.description)}</textarea>
+          <button class="full" id="editSaveBtn" type="button">Save changes</button>
+          <div class="err" id="editMsg"></div>
+        </details>
+        <details class="section">
+          <summary>📥 Import email list</summary>
+          <p style="color:var(--muted);font-size:13px;margin:0 0 8px">Paste one entry per line: <code>email</code> or <code>email, name</code>. Existing entrants are skipped, never duplicated.</p>
+          <textarea id="importText" placeholder="jane@example.com, Jane Doe&#10;mark@example.com"></textarea>
+          <button class="full" id="importBtn" type="button">Import entrants</button>
+          <div class="ok" id="importMsg"></div>
+        </details>` : ''}
+        ${participants.length ? `<h2 style="margin-top:22px">Entrants</h2><table>
+          <thead><tr><th>Email</th><th>Name</th><th>Entries</th><th>Referrals</th><th>Purchases</th><th>Joined</th></tr></thead>
+          <tbody>${participants.map((p) => `<tr>
+            <td>${escapeHtml(p.email)}</td><td>${escapeHtml(p.name || '—')}</td>
+            <td><strong>${p.tickets}</strong></td><td>${p.referrals}</td><td>${p.purchases}</td>
+            <td style="color:var(--muted)">${p.created_at}</td></tr>`).join('')}</tbody>
+        </table>` : '<div class="empty">No entrants yet.</div>'}
+      `;
+
+      const drawBtn = el('drawBtn');
+      if (drawBtn) drawBtn.onclick = async () => {
+        if (!confirm('Draw a winner now? This closes the giveaway and prepares the announcement + winner emails.')) return;
+        drawBtn.disabled = true;
+        try { await api('/api/admin/giveaways/' + id + '/draw', { method: 'POST' }); await selectGiveaway(id); }
+        catch (e) { alert(e.message); drawBtn.disabled = false; }
+      };
+
+      const editBtn = el('editSaveBtn');
+      if (editBtn) editBtn.onclick = async () => {
+        el('editMsg').textContent = '';
+        try {
+          await api('/api/admin/giveaways/' + id, jsonReq('PUT', {
+            title: el('editTitle').value, prize: el('editPrize').value, description: el('editDesc').value,
+          }));
+          await selectGiveaway(id);
+        } catch (e) { el('editMsg').textContent = e.message; }
+      };
+
+      const importBtn = el('importBtn');
+      if (importBtn) importBtn.onclick = async () => {
+        el('importMsg').textContent = '';
+        importBtn.disabled = true;
+        try {
+          const r = await api('/api/admin/giveaways/' + id + '/import', jsonReq('POST', { text: el('importText').value }));
+          await selectGiveaway(id);
+          // selectGiveaway re-renders; show the result via the cycle message slot instead
+          el('cycleMsg').textContent = `Imported ${r.added} new entrants (${r.skipped} skipped).`;
+          setTimeout(() => (el('cycleMsg').textContent = ''), 6000);
+        } catch (e) { el('importMsg').textContent = e.message; importBtn.disabled = false; }
+      };
+
+      for (const card of document.querySelectorAll('.draft')) {
+        const draftId = card.dataset.id;
+        const msg = card.querySelector('.d-msg');
+        const save = async () =>
+          api('/api/admin/drafts/' + draftId, jsonReq('PUT', {
+            subject: card.querySelector('.d-subject').value,
+            body: card.querySelector('.d-body').value,
+          }));
+        card.querySelector('.d-save')?.addEventListener('click', async () => {
+          msg.textContent = '';
+          try { await save(); msg.className = 'ok d-msg'; msg.textContent = 'Saved.'; }
+          catch (e) { msg.className = 'err d-msg'; msg.textContent = e.message; }
+        });
+        card.querySelector('.d-send')?.addEventListener('click', async (ev) => {
+          if (!confirm('Send this email now?')) return;
+          ev.target.disabled = true;
+          msg.textContent = '';
+          try { await save(); await api('/api/admin/drafts/' + draftId + '/send', { method: 'POST' }); await selectGiveaway(id); }
+          catch (e) { msg.className = 'err d-msg'; msg.textContent = e.message; ev.target.disabled = false; }
+        });
+        card.querySelector('.d-copy')?.addEventListener('click', async (ev) => {
+          const text = `Subject: ${card.querySelector('.d-subject').value}\n\n${card.querySelector('.d-body').value}`;
+          try { await navigator.clipboard.writeText(text); } catch {}
+          ev.target.textContent = 'Copied!';
+          setTimeout(() => (ev.target.textContent = 'Copy text'), 1500);
+        });
+      }
+    }
+
+    el('cycleBtn').addEventListener('click', async () => {
+      el('cycleMsg').textContent = '';
+      try {
+        const { actions } = await api('/api/admin/auto-draw/run', { method: 'POST' });
+        el('cycleMsg').textContent = actions.length
+          ? actions.map((a) => a.action.replace(/_/g, ' ') + (a.winner ? ': ' + a.winner : '') + (a.title ? ' (' + a.title + ')' : '')).join(' · ')
+          : 'Nothing to do — no giveaway month has ended.';
+        await loadList();
+        if (selectedId) await selectGiveaway(selectedId);
+      } catch (e) { el('cycleMsg').textContent = e.message; }
+    });
+
+    el('newForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      el('newErr').textContent = '';
+      try {
+        const { giveaway } = await api('/api/admin/giveaways', jsonReq('POST', {
+          title: el('title').value, prize: el('prize').value,
+          period: el('period').value, description: el('description').value,
+        }));
+        el('newForm').reset();
+        el('period').value = defaultPeriod();
+        await selectGiveaway(giveaway.id);
+      } catch (e2) { el('newErr').textContent = e2.message; }
+    });
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
+    function defaultPeriod() {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    }
+
+    el('period').value = defaultPeriod();
+    loadList();
+  </script>
+</body>
+</html>

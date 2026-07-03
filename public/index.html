@@ -37,6 +37,14 @@
     .qr { margin:16px auto 0; display:block; border-radius:8px; }
     .closed { text-align:center; color:var(--muted); padding:20px 0; }
     .footer { text-align:center; color:var(--muted); font-size:12px; margin-top:28px; }
+    /* winners wall */
+    .winners { margin-top:24px; }
+    .winners h2 { text-align:center; font-size:14px; color:var(--muted); text-transform:uppercase; letter-spacing:2px; margin:0 0 14px; }
+    .winner-card { display:flex; align-items:center; gap:14px; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-bottom:10px; }
+    .winner-card .trophy { font-size:24px; }
+    .winner-card .who { font-weight:700; font-size:16px; }
+    .winner-card .what { color:var(--muted); font-size:13px; margin-top:2px; }
+    .winner-card.latest { border-color:var(--accent); background:#181d12; }
   </style>
 </head>
 <body>
@@ -83,6 +91,11 @@
         </div>
       </div>
     </div>
+    <div class="winners" id="winnersWall" style="display:none">
+      <h2>🏆 Past Winners</h2>
+      <div id="winnersList"></div>
+    </div>
+
     <div class="footer">One entry per email per giveaway. Winners drawn monthly.</div>
   </div>
 
@@ -155,7 +168,30 @@
       setTimeout(() => (el('copyBtn').textContent = 'Copy'), 1500);
     });
 
+    async function loadWinners() {
+      try {
+        const { winners } = await (await fetch('/api/winners')).json();
+        if (!winners || !winners.length) return;
+        el('winnersWall').style.display = 'block';
+        el('winnersList').innerHTML = winners
+          .map((w, i) => `
+            <div class="winner-card${i === 0 ? ' latest' : ''}">
+              <div class="trophy">${i === 0 ? '🏆' : '🎉'}</div>
+              <div>
+                <div class="who">${escapeHtml(w.winner)}</div>
+                <div class="what">won ${escapeHtml(w.prize || w.title)} · ${escapeHtml(w.month)}</div>
+              </div>
+            </div>`)
+          .join('');
+      } catch { /* winners wall is optional */ }
+    }
+
+    function escapeHtml(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
     loadCurrent();
+    loadWinners();
   </script>
 </body>
 </html>

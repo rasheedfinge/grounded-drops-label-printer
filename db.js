@@ -16,7 +16,7 @@ db.exec(`
     description TEXT NOT NULL DEFAULT '',
     prize       TEXT NOT NULL DEFAULT '',
     period      TEXT NOT NULL,                 -- e.g. "2026-06"
-    status      TEXT NOT NULL DEFAULT 'open',  -- open | drawn
+    status      TEXT NOT NULL DEFAULT 'open',  -- open | drawn | closed
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     drawn_at    TEXT
   );
@@ -37,7 +37,7 @@ db.exec(`
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     giveaway_id    INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
-    source         TEXT NOT NULL,   -- signup | referral | purchase
+    source         TEXT NOT NULL,   -- signup | referral | purchase | import
     note           TEXT NOT NULL DEFAULT '',
     order_id       TEXT,            -- Shopify order id, when source = purchase
     created_at     TEXT NOT NULL DEFAULT (datetime('now'))
@@ -51,9 +51,30 @@ db.exec(`
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     giveaway_id    INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
     participant_id INTEGER NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+    discount_code  TEXT,
     drawn_at       TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Emails prepared when a winner is drawn: one announcement for the whole list,
+  -- one confirmation request for the winner. Editable before sending.
+  CREATE TABLE IF NOT EXISTS email_drafts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    giveaway_id INTEGER NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
+    type        TEXT NOT NULL,                  -- announcement | winner
+    subject     TEXT NOT NULL,
+    body        TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'draft',  -- draft | sent
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    sent_at     TEXT
+  );
 `);
+
+// Migration for databases created before winners.discount_code existed.
+try {
+  db.exec('ALTER TABLE winners ADD COLUMN discount_code TEXT');
+} catch {
+  /* column already exists */
+}
 
 // ---- Config knobs (overridable via env) ----
 const REFERRAL_TICKET_CAP = Number(process.env.REFERRAL_TICKET_CAP || 10);
@@ -62,6 +83,30 @@ const PURCHASE_TICKETS_PER_ORDER = Number(process.env.PURCHASE_TICKETS_PER_ORDER
 function genReferralCode() {
   // Short, URL-safe, unambiguous.
   return crypto.randomBytes(6).toString('base64url').replace(/[-_]/g, '').slice(0, 8).toUpperCase();
+}
+
+function genDiscountCode() {
+  return 'GD' + crypto.randomBytes(8).toString('base64url').replace(/[-_]/g, '').slice(0, 10);
+}
+
+function currentPeriod(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function periodMonthName(period) {
+  const [y, m] = period.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+/** "Jamie Oliver-Smith" -> "Jamie O." — public-safe winner display name. */
+function displayName(name, email) {
+  const clean = String(name || '').trim();
+  if (clean) {
+    const parts = clean.split(/\s+/);
+    if (parts.length === 1) return parts[0];
+    return `${parts[0]} ${parts[parts.length - 1][0].toUpperCase()}.`;
+  }
+  return `${String(email)[0].toUpperCase()}***`;
 }
 
 // ---- Giveaways ----
@@ -74,6 +119,18 @@ function createGiveaway({ title, description = '', prize = '', period }) {
 
 function getGiveaway(id) {
   return db.prepare('SELECT * FROM giveaways WHERE id = ?').get(id);
+}
+
+function updateGiveaway(id, { title, description, prize }) {
+  const g = getGiveaway(id);
+  if (!g) return null;
+  db.prepare('UPDATE giveaways SET title = ?, description = ?, prize = ? WHERE id = ?').run(
+    title ?? g.title,
+    description ?? g.description,
+    prize ?? g.prize,
+    id
+  );
+  return getGiveaway(id);
 }
 
 function listGiveaways() {
@@ -130,7 +187,7 @@ function referralTicketCount(participantId) {
  * Idempotent enrollment. Creates the participant on first contact (with a signup ticket),
  * credits the referrer once, and always returns the participant + their referral code.
  */
-const enroll = db.transaction(({ giveawayId, email, name = '', refCode = null }) => {
+const enroll = db.transaction(({ giveawayId, email, name = '', refCode = null, source = 'signup' }) => {
   email = String(email).trim().toLowerCase();
   name = String(name || '').trim();
 
@@ -151,7 +208,7 @@ const enroll = db.transaction(({ giveawayId, email, name = '', refCode = null })
       )
       .run(giveawayId, email, name, code, refCode);
     participant = getParticipant(info.lastInsertRowid);
-    addTicket(giveawayId, participant.id, 'signup', 'Joined the giveaway');
+    addTicket(giveawayId, participant.id, source, source === 'import' ? 'Imported from customer list' : 'Joined the giveaway');
 
     // Credit the referrer (only for genuinely new participants, never self-referral).
     if (refCode) {
@@ -175,6 +232,23 @@ function getParticipant(id) {
 function participantTicketCount(participantId) {
   return db.prepare('SELECT COUNT(*) AS n FROM tickets WHERE participant_id = ?').get(participantId).n;
 }
+
+/** Bulk-import a customer list. Each row: { email, name? }. Idempotent per email. */
+const importEntrants = db.transaction((giveawayId, rows) => {
+  let added = 0;
+  let skipped = 0;
+  for (const row of rows) {
+    const email = String(row.email || '').trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      skipped++;
+      continue;
+    }
+    const { isNew } = enroll({ giveawayId, email, name: row.name || '', source: 'import' });
+    if (isNew) added++;
+    else skipped++;
+  }
+  return { added, skipped };
+});
 
 /** Record entries for a Shopify order. Idempotent on order_id. */
 const recordPurchase = db.transaction(({ giveawayId, email, name, orderId, tickets }) => {
@@ -218,11 +292,14 @@ function giveawayStats(giveawayId) {
   return { participants, totals };
 }
 
-/** Weighted random draw: every ticket is one equal chance. */
-const drawWinner = db.transaction((giveawayId) => {
+/**
+ * Weighted random draw: every ticket is one equal chance.
+ * Also generates the winner's discount code and both email drafts.
+ */
+const drawWinner = db.transaction((giveawayId, { baseUrl = '' } = {}) => {
   const giveaway = getGiveaway(giveawayId);
   if (!giveaway) throw new Error('Giveaway not found');
-  if (giveaway.status === 'drawn') throw new Error('A winner has already been drawn for this giveaway');
+  if (giveaway.status !== 'open') throw new Error('A winner has already been drawn for this giveaway');
 
   const ticketIds = db
     .prepare('SELECT id, participant_id FROM tickets WHERE giveaway_id = ?')
@@ -230,20 +307,25 @@ const drawWinner = db.transaction((giveawayId) => {
   if (ticketIds.length === 0) throw new Error('No entries to draw from');
 
   const pick = ticketIds[crypto.randomInt(ticketIds.length)];
-  db.prepare('INSERT INTO winners (giveaway_id, participant_id) VALUES (?, ?)').run(
+  const discountCode = genDiscountCode();
+  db.prepare('INSERT INTO winners (giveaway_id, participant_id, discount_code) VALUES (?, ?, ?)').run(
     giveawayId,
-    pick.participant_id
+    pick.participant_id,
+    discountCode
   );
   db.prepare("UPDATE giveaways SET status = 'drawn', drawn_at = datetime('now') WHERE id = ?").run(
     giveawayId
   );
-  return getWinner(giveawayId);
+
+  const winner = getWinner(giveawayId);
+  createDraftsForWinner(giveaway, winner, baseUrl);
+  return winner;
 });
 
 function getWinner(giveawayId) {
   return db
     .prepare(
-      `SELECT w.drawn_at, p.email, p.name, p.referral_code,
+      `SELECT w.drawn_at, w.discount_code, p.email, p.name, p.referral_code,
               (SELECT COUNT(*) FROM tickets t WHERE t.participant_id = p.id) AS tickets
        FROM winners w JOIN participants p ON p.id = w.participant_id
        WHERE w.giveaway_id = ?
@@ -252,19 +334,173 @@ function getWinner(giveawayId) {
     .get(giveawayId);
 }
 
+/** Publicly showable winner list: "Jamie O." style names only. */
+function publicWinners(limit = 12) {
+  return db
+    .prepare(
+      `SELECT g.title, g.period, g.prize, w.drawn_at, p.name, p.email
+       FROM winners w
+       JOIN giveaways g ON g.id = w.giveaway_id
+       JOIN participants p ON p.id = w.participant_id
+       ORDER BY w.drawn_at DESC LIMIT ?`
+    )
+    .all(limit)
+    .map((r) => ({
+      title: r.title,
+      period: r.period,
+      month: periodMonthName(r.period),
+      prize: r.prize,
+      drawnAt: r.drawn_at,
+      winner: displayName(r.name, r.email),
+    }));
+}
+
+// ---- Email drafts ----
+function createDraftsForWinner(giveaway, winner, baseUrl) {
+  const month = periodMonthName(giveaway.period);
+  const winnerPublic = displayName(winner.name, winner.email);
+  const firstName = (winner.name || '').trim().split(/\s+/)[0] || 'there';
+  const enterUrl = baseUrl ? `${baseUrl}/` : '[your giveaway page URL]';
+  const prize = giveaway.prize || 'this month’s prize';
+
+  const insert = db.prepare(
+    'INSERT INTO email_drafts (giveaway_id, type, subject, body) VALUES (?, ?, ?, ?)'
+  );
+
+  insert.run(
+    giveaway.id,
+    'announcement',
+    `\u{1F389} Our ${month} giveaway winner is ${winnerPublic}!`,
+    `Hey Grounded Drops fam,
+
+The results are in — our ${month} giveaway winner is ${winnerPublic}, taking home ${prize}. Congratulations!
+
+Didn’t win this time? A brand-new giveaway is already open. Enter here (it takes 10 seconds):
+
+${enterUrl}
+
+Pro tip: share your personal referral link after entering — every friend who joins earns you a bonus entry. Shopify orders count too.
+
+Good luck!
+— The Grounded Drops team`
+  );
+
+  insert.run(
+    giveaway.id,
+    'winner',
+    `You WON the ${giveaway.title}! \u{1F389}`,
+    `Hi ${firstName},
+
+Amazing news — you’re the winner of our ${month} giveaway, and ${prize} is yours!
+
+To claim your prize, just reply to this email and confirm:
+  • Your full name
+  • Your shipping address
+  • A phone number for the courier
+
+As an extra thank-you, here’s a personal discount code for your next order:
+
+  ${winner.discount_code}
+
+Please confirm within 14 days so we can get your prize shipped.
+
+Congratulations again!
+— The Grounded Drops team`
+  );
+}
+
+function listDrafts(giveawayId) {
+  return db
+    .prepare('SELECT * FROM email_drafts WHERE giveaway_id = ? ORDER BY id ASC')
+    .all(giveawayId);
+}
+
+function getDraft(id) {
+  return db.prepare('SELECT * FROM email_drafts WHERE id = ?').get(id);
+}
+
+function updateDraft(id, { subject, body }) {
+  db.prepare('UPDATE email_drafts SET subject = ?, body = ? WHERE id = ?').run(subject, body, id);
+  return getDraft(id);
+}
+
+function markDraftSent(id) {
+  db.prepare("UPDATE email_drafts SET status = 'sent', sent_at = datetime('now') WHERE id = ?").run(id);
+  return getDraft(id);
+}
+
+function participantEmails(giveawayId) {
+  return db
+    .prepare('SELECT email FROM participants WHERE giveaway_id = ?')
+    .all(giveawayId)
+    .map((r) => r.email);
+}
+
+// ---- Automatic monthly draw ----
+/**
+ * Runs the monthly lifecycle. For every open giveaway whose month has ended:
+ * draw a winner (or close it if it had no entries). Then, if no giveaway is
+ * open, create one for the current month. Returns a log of actions taken.
+ */
+function autoDrawTick({ baseUrl = '', autoCreate = true, now = new Date() } = {}) {
+  const period = currentPeriod(now);
+  const actions = [];
+
+  const expired = db
+    .prepare("SELECT * FROM giveaways WHERE status = 'open' AND period < ?")
+    .all(period);
+
+  for (const g of expired) {
+    const tickets = db.prepare('SELECT COUNT(*) AS n FROM tickets WHERE giveaway_id = ?').get(g.id).n;
+    if (tickets > 0) {
+      const winner = drawWinner(g.id, { baseUrl });
+      actions.push({ action: 'drew_winner', giveawayId: g.id, title: g.title, winner: displayName(winner.name, winner.email) });
+    } else {
+      db.prepare("UPDATE giveaways SET status = 'closed' WHERE id = ?").run(g.id);
+      actions.push({ action: 'closed_empty', giveawayId: g.id, title: g.title });
+    }
+  }
+
+  if (autoCreate && !getCurrentOpenGiveaway()) {
+    const month = periodMonthName(period);
+    const prev = db.prepare('SELECT prize, description FROM giveaways ORDER BY id DESC LIMIT 1').get();
+    const created = createGiveaway({
+      title: `${month} Giveaway`,
+      description: prev?.description || 'Enter for a chance to win this month’s Grounded Drops giveaway!',
+      prize: prev?.prize || '',
+      period,
+    });
+    actions.push({ action: 'created_giveaway', giveawayId: created.id, title: created.title });
+  }
+
+  return actions;
+}
+
 module.exports = {
   db,
   REFERRAL_TICKET_CAP,
   PURCHASE_TICKETS_PER_ORDER,
+  currentPeriod,
+  periodMonthName,
+  displayName,
   createGiveaway,
   getGiveaway,
+  updateGiveaway,
   listGiveaways,
   getCurrentOpenGiveaway,
   getParticipantByEmail,
   enroll,
+  importEntrants,
   recordPurchase,
   participantTicketCount,
   giveawayStats,
   drawWinner,
   getWinner,
+  publicWinners,
+  listDrafts,
+  getDraft,
+  updateDraft,
+  markDraftSent,
+  participantEmails,
+  autoDrawTick,
 };

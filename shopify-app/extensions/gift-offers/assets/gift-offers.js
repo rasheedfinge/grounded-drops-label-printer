@@ -178,7 +178,7 @@
     }
 
     // Sanity checks (debug mode surfaces these loudly).
-    if (!o.minSpendCents && !o.buy) {
+    if (!o.minSpendCents && !o.minSpendByCurrency && !o.buy) {
       issues.push({ offer: o.id, problem: 'No condition — add "minSpend" (dollars) or a "buy" rule.' });
       return null;
     }
@@ -405,8 +405,15 @@
 
   function isEligible(offer, cart) {
     if (offer._disabled || !withinSchedule(offer)) return false;
-    var threshold = thresholdFor(offer);
-    if (threshold != null && qualifyingSubtotalCents(cart) < threshold) return false;
+    var hasSpendRule = offer.minSpendCents != null || offer.minSpendByCurrency;
+    if (hasSpendRule) {
+      var threshold = thresholdFor(offer);
+      // A spend-gated offer with no threshold for the shopper's currency
+      // (minSpendByCurrency only, currency unlisted, no minSpend fallback)
+      // stays inactive rather than becoming a free-for-all.
+      if (threshold == null) return false;
+      if (qualifyingSubtotalCents(cart) < threshold) return false;
+    }
     if (offer.buy && buyCount(offer, cart) < offer.buy.quantity) return false;
     return true;
   }
@@ -434,9 +441,21 @@
     });
   }
 
+  // Gift variants must be resolved before we can verify/enforce an existing
+  // gift line — but only fetch product data for offers that actually have a
+  // gift line in the cart (avoids per-pageview fetches for idle offers).
+  function resolveNeededGifts(offer, cart) {
+    if (!giftLinesFor(cart, offer.id).length) return Promise.resolve();
+    return Promise.all(offer.gifts.map(resolveGiftVariant)).then(function () {});
+  }
+
   function reconcile() {
     return getCart().then(function (cart) {
-      return Promise.all(OFFERS.map(resolveBuyProducts)).then(function () {
+      return Promise.all(
+        OFFERS.map(resolveBuyProducts).concat(
+          OFFERS.map(function (offer) { return resolveNeededGifts(offer, cart); })
+        )
+      ).then(function () {
         return applyOffers(cart);
       });
     }).then(function (result) {
@@ -452,15 +471,21 @@
     });
   }
 
-  // Configured quantity for a gift cart line (used to undo shopper edits to
-  // the FREE line's quantity — extras would ring up at full price).
-  function configuredGiftQuantity(offer, line) {
+  // The configured gift definition backing a gift cart line, or null if the
+  // line's variant is no longer one of the offer's gifts.
+  function giftDefForLine(offer, line) {
     for (var i = 0; i < offer.gifts.length; i++) {
       var g = offer.gifts[i];
       var vid = g.variantId || g._resolvedVariantId;
-      if (vid && String(vid) === String(line.variant_id)) return g.quantity;
+      if (vid && String(vid) === String(line.variant_id)) return g;
     }
-    return 1;
+    return null;
+  }
+
+  // True when every gift has a known variant id, i.e. we can safely judge
+  // whether an existing line still belongs to this offer.
+  function giftsFullyResolved(offer) {
+    return offer.gifts.every(function (g) { return g.variantId || g._resolvedVariantId; });
   }
 
   function applyOffers(cart) {
@@ -493,16 +518,28 @@
         mutations.push(function () { return removeLine(line.key); });
       });
 
-      if (existing.length) {
-        // Enforce the configured quantity (shoppers can edit the free line,
-        // or two tabs may have merged adds into a double-quantity line).
-        var line = existing[0];
-        var wantQty = configuredGiftQuantity(offer, line);
-        if (line.quantity !== wantQty) {
-          mutations.push(function () { return setLineQuantity(line.key, wantQty); });
+      var keep = existing[0] || null;
+      if (keep && giftsFullyResolved(offer)) {
+        var giftDef = giftDefForLine(offer, keep);
+        if (!giftDef) {
+          // The merchant swapped this offer's gift since the shopper's last
+          // visit — the old variant would ring up at full price. Replace it.
+          log('offer', offer.id, ': replacing stale gift variant', keep.variant_id);
+          (function (line) {
+            mutations.push(function () { return removeLine(line.key); });
+          })(keep);
+          keep = null; // fall through: auto re-adds, slider waits for a pick
+        } else if (keep.quantity !== giftDef.quantity) {
+          // Enforce the configured quantity (shoppers can edit the free line,
+          // or two tabs may have merged adds into a double-quantity line).
+          (function (line, wantQty) {
+            mutations.push(function () { return setLineQuantity(line.key, wantQty); });
+          })(keep, giftDef.quantity);
         }
-        return;
       }
+      // If gifts couldn't be resolved this pass (product fetch pending or
+      // failing), leave the existing line untouched rather than guessing.
+      if (keep) return;
 
       if (offer.type === 'slider') return; // shopper hasn't picked yet — fine
 
@@ -766,12 +803,16 @@
     });
 
     if (!teaserEnabled || sliderVisible || !hasPaidItems || (!best && !justUnlocked)) {
+      if (unlockedTimer) { clearTimeout(unlockedTimer); unlockedTimer = null; }
       ui.teaser.setAttribute('hidden', '');
       ui.teaser.classList.remove('is-unlocked');
       return;
     }
 
     if (best) {
+      // A pending "unlocked" flash timer must not hide the progress bar we're
+      // about to show (cart dropped back under the threshold within 4s).
+      if (unlockedTimer) { clearTimeout(unlockedTimer); unlockedTimer = null; }
       ui.teaser.classList.remove('is-unlocked');
       ui.teaserText.textContent = STRINGS.teaserText.replace('{amount}', formatMoney(best.remaining));
       ui.teaserFill.style.width = Math.min(100, Math.round((subtotal / best.threshold) * 100)) + '%';
@@ -802,13 +843,13 @@
     lastSliderKey = key;
 
     ui.sliderItems.innerHTML = '';
-    offer.gifts.forEach(function (gift) {
+    var cardPromises = offer.gifts.map(function (gift) {
       var card = document.createElement('div');
       card.className = 'gd-card';
       card.innerHTML = '<div class="gd-card__skeleton"></div>';
       ui.sliderItems.appendChild(card);
 
-      Promise.all([getProduct(gift.handle), resolveGiftVariant(gift)]).then(function (results) {
+      return Promise.all([getProduct(gift.handle), resolveGiftVariant(gift)]).then(function (results) {
         var product = results[0];
         var variantId = results[1];
         if (!variantId) { card.remove(); return; }
@@ -819,17 +860,30 @@
         card.setAttribute('data-variant-id', String(variantId));
         card.className = 'gd-card' + (isChosen ? ' is-selected' : '');
         card.innerHTML =
-          (img ? '<img class="gd-card__img" src="' + img + '" alt="" loading="lazy">' : '') +
+          (img ? '<img class="gd-card__img" alt="" loading="lazy">' : '') +
           '<div class="gd-card__title"></div>' +
-          '<div class="gd-card__price">' + (gift.label || STRINGS.freeLabel) + '</div>' +
-          '<button type="button" class="gd-card__btn"' + (DESIGN_MODE ? ' disabled' : '') + '>' +
-            (isChosen ? STRINGS.addedLabel : STRINGS.addLabel) +
-          '</button>';
-        card.querySelector('.gd-card__title').textContent = title; // textContent: titles may contain HTML chars
+          '<div class="gd-card__price"></div>' +
+          '<button type="button" class="gd-card__btn"' + (DESIGN_MODE ? ' disabled' : '') + '></button>';
+        // Text lands via textContent / property assignment so merchant-entered
+        // labels with HTML characters ("Tea & Tote") render literally.
+        if (img) card.querySelector('.gd-card__img').src = img;
+        card.querySelector('.gd-card__title').textContent = title;
+        card.querySelector('.gd-card__price').textContent = gift.label || STRINGS.freeLabel;
+        card.querySelector('.gd-card__btn').textContent = isChosen ? STRINGS.addedLabel : STRINGS.addLabel;
         card.querySelector('.gd-card__btn').addEventListener('click', function () {
           chooseGift(offer, gift, variantId, title);
         });
       });
+    });
+
+    // If every gift failed to resolve (deleted handles, network trouble),
+    // don't leave an empty "pick your gift" box on screen — hide it and let
+    // the next reconcile retry the render.
+    Promise.all(cardPromises).then(function () {
+      if (lastSliderKey === key && !ui.sliderItems.querySelector('.gd-card')) {
+        ui.slider.setAttribute('hidden', '');
+        lastSliderKey = null;
+      }
     });
   }
 

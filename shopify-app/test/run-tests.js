@@ -308,6 +308,41 @@ test('gift quantity edits are reverted (free line can\'t be multiplied)', async 
   await context.close();
 });
 
+test('handle-based gift with quantity 2 is preserved for returning customers, and edits reset to 2', async () => {
+  const AUTO_QTY2 = { id: 'auto2', type: 'auto', minSpend: 50, gift: { product: 'sample-pack-citrus', quantity: 2 } };
+  // Returning customer: gift line (qty 2) already in the cart on page load.
+  await resetStore({ cart: { items: [{ id: 111, quantity: 3 }, { id: 222, quantity: 2, properties: { _gift: 'auto2' } }] } });
+  const { page, context } = await openStore([AUTO_QTY2]);
+  await sleep(1500);
+  let g = giftLines(await getCart(), 'auto2');
+  eq(g.length, 1, 'still one gift line');
+  eq(g[0].quantity, 2, 'configured quantity 2 NOT clamped to 1');
+  // Shopper bumps the free line to 5 → reset to the configured 2, not 1.
+  await page.evaluate(async (key) => {
+    await fetch('/cart/change.js', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: key, quantity: 5 }),
+    });
+  }, g[0].key);
+  await until(async () => {
+    const lines = giftLines(await getCart(), 'auto2');
+    return lines.length === 1 && lines[0].quantity === 2;
+  }, 5000, 'gift quantity reset to configured 2');
+  await context.close();
+});
+
+test('stale gift variant (merchant swapped the gift in a live offer) is replaced', async () => {
+  // Offer auto50's gift is citrus (222), but the returning customer's cart
+  // still holds the previously-configured berry (333) tagged with the same id.
+  await resetStore({ cart: { items: [{ id: 111, quantity: 3 }, { id: 333, quantity: 1, properties: { _gift: 'auto50' } }] } });
+  const { context } = await openStore([AUTO_50]);
+  await until(async () => {
+    const g = giftLines(await getCart(), 'auto50');
+    return g.length === 1 && g[0].variant_id === 222;
+  }, 6000, 'stale berry line replaced by current citrus gift');
+  await context.close();
+});
+
 test('orphaned gift lines from retired offers are removed', async () => {
   // Cart carries a gift from an offer id that's no longer configured.
   await resetStore({ cart: { items: [{ id: 111, quantity: 3 }, { id: 222, quantity: 1, properties: { _gift: 'old-deleted-offer' } }] } });

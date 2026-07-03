@@ -242,7 +242,7 @@ the gift, the discount makes it free. Keep the thresholds identical.
 | `type` | `auto`, `slider`, or `bogo`. |
 | `title` | Slider headline (optional). |
 | `minSpend` | Minimum spend in **dollars** (e.g. `50` or `49.99`). Gift lines never count toward it. |
-| `minSpendByCurrency` | Optional per-currency thresholds for Shopify Markets stores, e.g. `{"USD": 50, "EUR": 45}`. |
+| `minSpendByCurrency` | Optional per-currency thresholds for Shopify Markets stores, e.g. `{"USD": 50, "EUR": 45}`. Currencies not listed fall back to `minSpend`; with no `minSpend` set, the offer stays inactive for unlisted currencies. |
 | `buy` | Required purchase: `{ "product": "handle", "quantity": 2 }`. `product` accepts one handle or a list. `variantId`/`productId` also work. |
 | `gift` / `get` / `gifts` | The gift(s): `{ "product": "handle", "variantId": 123, "quantity": 1, "label": "FREE" }`. `variantId` only needed for multi-variant products (otherwise the first available variant is used). |
 | `startsAt` / `endsAt` | Optional ISO dates to schedule the offer, e.g. `"2026-07-04T00:00:00Z"`. Schedule the matching discount too (discounts have native start/end dates). |

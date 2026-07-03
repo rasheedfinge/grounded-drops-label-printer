@@ -257,6 +257,15 @@
     return s || fallback;
   }
 
+  function isoToLocalInput(iso) {
+    if (!iso) return '';
+    var d = new Date(iso);
+    if (isNaN(d)) return '';
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
   function setType(type) {
     currentType = type;
     document.querySelectorAll('.type-picker button').forEach(function (b) {
@@ -389,8 +398,9 @@
       row.querySelector('.g-handle').value = g.product || '';
       row.querySelector('.g-variant').value = g.variantId || '';
     });
-    $('startsAt').value = o.startsAt ? o.startsAt.slice(0, 16) : '';
-    $('endsAt').value = o.endsAt ? o.endsAt.slice(0, 16) : '';
+    // Stored times are UTC ISO strings; datetime-local wants local wall-clock.
+    $('startsAt').value = isoToLocalInput(o.startsAt);
+    $('endsAt').value = isoToLocalInput(o.endsAt);
     render();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }

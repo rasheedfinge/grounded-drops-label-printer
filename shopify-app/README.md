@@ -26,7 +26,10 @@ server-side by Shopify and can't be gamed from the browser.
 cd test && npm install && npm test
 ```
 
-13 scenarios run the real widget in headless Chromium against a mock Shopify
+18 scenarios run the real widget in headless Chromium against a mock Shopify
 storefront: auto-add/remove, slider choose/switch/toggle, dismissal + reopen
 chip, BOGO, duplicate-prevention, out-of-stock gifts, theme-editor safety,
-XHR-based themes, legacy config compatibility, and threshold self-counting.
+XHR-based themes, legacy config compatibility, threshold self-counting
+(no oscillation), gift-quantity enforcement, stale-gift replacement after a
+merchant edits a live offer, orphaned-gift cleanup, and open-drawer
+preservation across section refreshes.

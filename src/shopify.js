@@ -255,6 +255,7 @@ function normalizeOrder(order) {
     fulfillmentStatus: order.displayFulfillmentStatus,
     currency,
     total: money(order.totalPriceSet),
+    outstanding: money(order.totalOutstandingSet) || 0,
     shippingAddress: order.shippingAddress || null,
     lineItems,
   };
@@ -378,6 +379,32 @@ async function sendInvoice(orderGid, { to, subject, customMessage } = {}) {
 /* -------------------------------------------------- high-level operations */
 
 /**
+ * Find the calculated line that corresponds to an original order line. The
+ * calculated line item carries the original line's numeric id; fall back to
+ * matching on the current variant id.
+ */
+function findCalcLine(calc, originalLineItemId, originalVariantId) {
+  const nodes = (calc.lineItems.edges || []).map((e) => e.node);
+  const wantedNumeric = numericId(originalLineItemId);
+  let target = nodes.find((n) => numericId(n.id) === wantedNumeric);
+  if (!target && originalVariantId) {
+    target = nodes.find((n) => n.variant && n.variant.id === originalVariantId);
+  }
+  return target || null;
+}
+
+/** Email a Shopify-hosted pay link when an edit left a balance owing. */
+async function invoiceIfOwing(orderGid, outstanding, { invoice, invoiceEmail, orderName, customMessage }) {
+  if (!invoice || !(outstanding > 0)) return false;
+  await sendInvoice(orderGid, {
+    to: invoiceEmail,
+    subject: `Payment link for your updated order${orderName ? ` ${orderName}` : ''}`,
+    customMessage,
+  });
+  return true;
+}
+
+/**
  * Swap one line item to a different variant of the same product:
  * add the new variant (carrying over the customer's effective discount),
  * zero-out and restock the original, commit, then settle any balance.
@@ -399,14 +426,7 @@ async function swapVariant(orderGid, {
   orderName,
 }) {
   const calc = await beginEdit(orderGid);
-  const nodes = (calc.lineItems.edges || []).map((e) => e.node);
-  // The calculated line item for an existing line carries the original line
-  // item's numeric id; fall back to matching on the current variant id.
-  const wantedNumeric = numericId(originalLineItemId);
-  let target = nodes.find((n) => numericId(n.id) === wantedNumeric);
-  if (!target && originalVariantId) {
-    target = nodes.find((n) => n.variant && n.variant.id === originalVariantId);
-  }
+  const target = findCalcLine(calc, originalLineItemId, originalVariantId);
   if (!target) {
     throw new Error('That item could not be found on the order any more — it may already have changed.');
   }
@@ -418,17 +438,67 @@ async function swapVariant(orderGid, {
   await editSetQuantity(calc.id, target.id, 0, true);
   const order = await commitEdit(calc.id, notifyCustomer, staffNote);
   const outstanding = money(order.totalOutstandingSet) || 0;
-
-  let invoiced = false;
-  if (invoice && outstanding > 0) {
-    await sendInvoice(orderGid, {
-      to: invoiceEmail,
-      subject: `Payment link for your updated order${orderName ? ` ${orderName}` : ''}`,
-      customMessage: 'Your order was updated as requested. Use the secure link below to pay the difference and we’ll get it packed.',
-    });
-    invoiced = true;
-  }
+  const invoiced = await invoiceIfOwing(orderGid, outstanding, {
+    invoice,
+    invoiceEmail,
+    orderName,
+    customMessage: 'Your order was updated as requested. Use the secure link below to pay the difference and we’ll get it packed.',
+  });
   return { outstanding, invoiced };
+}
+
+/**
+ * Change the quantity of an existing line item (increase, decrease, or remove
+ * with quantity 0). Existing line pricing/discounts are recalculated by
+ * Shopify; whatever balance results is settled via invoice or flagged for
+ * refund by the caller.
+ */
+async function changeQuantity(orderGid, {
+  originalLineItemId,
+  originalVariantId,
+  newQuantity,
+  notifyCustomer,
+  staffNote,
+  invoice,
+  invoiceEmail,
+  orderName,
+}) {
+  const calc = await beginEdit(orderGid);
+  const target = findCalcLine(calc, originalLineItemId, originalVariantId);
+  if (!target) {
+    throw new Error('That item could not be found on the order any more — it may already have changed.');
+  }
+  const restock = newQuantity < (target.quantity || 0);
+  await editSetQuantity(calc.id, target.id, newQuantity, restock);
+  const order = await commitEdit(calc.id, notifyCustomer, staffNote);
+  const outstanding = money(order.totalOutstandingSet) || 0;
+  const invoiced = await invoiceIfOwing(orderGid, outstanding, {
+    invoice,
+    invoiceEmail,
+    orderName,
+    customMessage: 'Your order quantity was updated. Use the secure link below to pay the difference and we’ll get it packed.',
+  });
+  return { outstanding, invoiced };
+}
+
+/**
+ * Cancel the whole order: refund to the original payment method, restock, and
+ * (by default) let Shopify email the customer its cancellation confirmation.
+ * Shopify processes the cancel as an async job.
+ */
+async function cancelOrder(orderGid, { staffNote, notifyCustomer = true } = {}) {
+  const data = await gql(
+    `mutation($orderId: ID!, $reason: OrderCancelReason!, $refund: Boolean!, $restock: Boolean!, $notifyCustomer: Boolean, $staffNote: String) {
+      orderCancel(orderId: $orderId, reason: $reason, refund: $refund, restock: $restock, notifyCustomer: $notifyCustomer, staffNote: $staffNote) {
+        job { id done }
+        orderCancelUserErrors { field message }
+      }
+    }`,
+    { orderId: orderGid, reason: 'CUSTOMER', refund: true, restock: true, notifyCustomer, staffNote: staffNote || null }
+  );
+  const errs = data.orderCancel.orderCancelUserErrors;
+  if (errs && errs.length) throw new Error(errs.map((e) => e.message).join('; '));
+  return data.orderCancel.job;
 }
 
 /**
@@ -452,15 +522,12 @@ async function addUpsellItem(orderGid, {
   }
   const order = await commitEdit(calc.id, notifyCustomer, staffNote);
   const outstanding = money(order.totalOutstandingSet) || 0;
-  let invoiced = false;
-  if (invoice && outstanding > 0) {
-    await sendInvoice(orderGid, {
-      to: invoiceEmail,
-      subject: `Payment link for your addition to order${orderName ? ` ${orderName}` : ''}`,
-      customMessage: 'Thanks for adding to your order! Use the secure link below to pay the small balance and we’ll pack it together.',
-    });
-    invoiced = true;
-  }
+  const invoiced = await invoiceIfOwing(orderGid, outstanding, {
+    invoice,
+    invoiceEmail,
+    orderName,
+    customMessage: 'Thanks for adding to your order! Use the secure link below to pay the small balance and we’ll pack it together.',
+  });
   return { outstanding, invoiced };
 }
 
@@ -479,6 +546,8 @@ module.exports = {
   normalizeOrder,
   updateShippingAddress,
   swapVariant,
+  changeQuantity,
+  cancelOrder,
   addUpsellItem,
   sendInvoice,
 };

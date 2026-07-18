@@ -71,14 +71,19 @@ async function api(path, body) {
 function renderStatus(data) {
   clearInterval(countdownTimer);
   const el = $('#statusCard');
-  const { eligibility } = data;
+  const { eligibility, order } = data;
+  let html = '';
   if (eligibility.editable) {
-    el.innerHTML = `<div class="banner ok" id="statusBanner"></div>`;
-    startCountdown(eligibility.closesAt);
+    html += `<div class="banner ok" id="statusBanner"></div>`;
   } else {
     const reasons = (eligibility.reasons || ['This order can no longer be edited.']).map((r) => `<li>${esc(r)}</li>`).join('');
-    el.innerHTML = `<div class="banner warn"><strong>This order can't be self-edited right now.</strong><ul style="margin:6px 0 0 18px;padding:0">${reasons}</ul></div>`;
+    html += `<div class="banner warn"><strong>This order can't be self-edited right now.</strong><ul style="margin:6px 0 0 18px;padding:0">${reasons}</ul></div>`;
   }
+  if (order && order.outstanding > 0) {
+    html += `<div class="banner warn" style="margin-top:10px">There’s an unpaid balance of <strong>${money(order.outstanding, order.currency)}</strong> on this order — check your email for the secure payment link.</div>`;
+  }
+  el.innerHTML = html;
+  if (eligibility.editable) startCountdown(eligibility.closesAt);
 }
 
 function startCountdown(closesAt) {
@@ -99,7 +104,7 @@ function startCountdown(closesAt) {
     banner.innerHTML = `<strong>You can still edit this order.</strong> Changes are open for about <strong>${left}</strong> longer.`;
   };
   tick();
-  countdownTimer = setInterval(tick, 30000);
+  countdownTimer = setInterval(tick, 15000);
 }
 
 function renderSummary(order) {
@@ -180,17 +185,30 @@ function fillSwapSelect(select, data) {
 
 function renderSwap(data) {
   const card = $('#swapCard');
-  const swappable = data.order.lineItems.filter((li) => li.swappable);
-  if (!data.permissions.swap || swappable.length === 0) { card.hidden = true; return; }
+  const rows = data.order.lineItems.filter((li) => li.swappable || li.qtyEditable);
+  if (rows.length === 0) { card.hidden = true; return; }
   card.hidden = false;
-  $('#swapList').innerHTML = swappable.map((li) => `
+  const canUp = data.permissions.quantity;
+  const canDown = data.permissions.remove;
+  $('#swapList').innerHTML = rows.map((li) => {
+    const min = canDown ? 0 : li.quantity;
+    const max = canUp ? 99 : li.quantity;
+    const qty = li.qtyEditable && (canUp || canDown) ? `
+        <span class="qty" data-current="${li.quantity}" data-min="${min}" data-max="${max}">
+          <button type="button" class="qminus" aria-label="Decrease quantity"${li.quantity <= min ? ' disabled' : ''}>−</button>
+          <span class="qval" aria-live="polite">${li.quantity}</span>
+          <button type="button" class="qplus" aria-label="Increase quantity"${li.quantity >= max ? ' disabled' : ''}>+</button>
+        </span>
+        <button type="button" class="btn primary qty-apply" hidden></button>` : '';
+    const swap = li.swappable ? `<button type="button" class="btn ghost swap-toggle">Change option</button>` : '';
+    return `
     <div class="swap-row" data-line="${esc(li.id)}">
       <div class="swap-head">
         <div>
           <div class="li-title">${esc(li.title)}</div>
-          <div class="li-sub">Currently: ${esc(li.variantTitle || '—')}</div>
+          <div class="li-sub">Currently: ${esc(li.variantTitle && li.variantTitle !== 'Default Title' ? li.variantTitle : '—')} × ${li.quantity}</div>
         </div>
-        <button type="button" class="btn ghost swap-toggle">Change</button>
+        <div class="item-actions">${qty}${swap}</div>
       </div>
       <div class="swap-controls">
         <label>New option
@@ -198,7 +216,23 @@ function renderSwap(data) {
         </label>
         <button type="button" class="btn primary swap-save" disabled>Save change</button>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+function renderCancel(data) {
+  const card = $('#cancelCard');
+  card.hidden = !data.permissions.cancel;
+}
+
+function showCancelledState(message) {
+  clearInterval(countdownTimer);
+  $('#orderView').innerHTML = `
+    <div class="card">
+      <div class="banner ok"><strong>Order cancelled.</strong></div>
+      <p style="margin:14px 0 0">${esc(message)}</p>
+      <p class="muted small" style="margin:10px 0 0">A confirmation email is on its way. If anything looks off, just reply to it.</p>
+    </div>`;
 }
 
 function renderUpsell(data) {
@@ -232,6 +266,7 @@ function render(data) {
   renderAddress(data);
   renderSwap(data);
   renderUpsell(data);
+  renderCancel(data);
 }
 
 async function refresh() {
@@ -280,11 +315,53 @@ $('#addressForm').addEventListener('submit', async (e) => {
   }
 });
 
-// Swap: expand a row, load options on demand, then save.
+// Items card: quantity steppers + variant swaps, all via delegation.
 $('#swapList').addEventListener('click', async (e) => {
   const row = e.target.closest('.swap-row');
   if (!row) return;
   const lineItemId = row.dataset.line;
+
+  // Quantity stepper: adjust locally, apply explicitly (each apply = one edit).
+  if (e.target.classList.contains('qminus') || e.target.classList.contains('qplus')) {
+    const qtyEl = row.querySelector('.qty');
+    const val = row.querySelector('.qval');
+    const apply = row.querySelector('.qty-apply');
+    const current = parseInt(qtyEl.dataset.current, 10);
+    const min = parseInt(qtyEl.dataset.min, 10);
+    const max = parseInt(qtyEl.dataset.max, 10);
+    let q = parseInt(val.textContent, 10) || current;
+    q += e.target.classList.contains('qplus') ? 1 : -1;
+    q = Math.max(min, Math.min(max, q));
+    val.textContent = q;
+    row.querySelector('.qminus').disabled = q <= min;
+    row.querySelector('.qplus').disabled = q >= max;
+    if (q === current) {
+      apply.hidden = true;
+    } else {
+      apply.hidden = false;
+      apply.textContent = q === 0 ? 'Remove item' : `Update quantity to ${q}`;
+    }
+    return;
+  }
+
+  if (e.target.classList.contains('qty-apply')) {
+    const val = row.querySelector('.qval');
+    const quantity = parseInt(val.textContent, 10);
+    if (quantity === 0) {
+      const title = row.querySelector('.li-title').textContent;
+      if (!confirm(`Remove “${title}” from your order? The amount you paid for it will be refunded.`)) return;
+    }
+    setLoading(e.target, true, 'Updating…');
+    try {
+      const data = await api('quantity', { lineItemId, quantity });
+      toast(data.message || 'Quantity updated.', 'ok');
+      await refresh();
+    } catch (err) {
+      toast(err.message, 'err');
+      setLoading(e.target, false);
+    }
+    return;
+  }
 
   if (e.target.classList.contains('swap-toggle')) {
     const controls = row.querySelector('.swap-controls');
@@ -336,13 +413,40 @@ $('#upsellGrid').addEventListener('click', async (e) => {
   }
 });
 
+// Cancel the whole order (shown only when the merchant enables it).
+$('#cancelBtn').addEventListener('click', async (e) => {
+  const name = state && state.order ? state.order.name : 'this order';
+  if (!confirm(`Cancel ${name}? This can’t be undone — your payment will be refunded to your original payment method.`)) return;
+  setLoading(e.target, true, 'Cancelling…');
+  try {
+    const data = await api('cancel', {});
+    showCancelledState(data.message || 'Your order has been cancelled.');
+  } catch (err) {
+    toast(err.message, 'err');
+    setLoading(e.target, false);
+  }
+});
+
 /* ------------------------------------------------------------------- init */
 
 (function init() {
   const params = new URLSearchParams(location.search);
   const token = params.get('token');
+  const order = params.get('order');
+  const email = params.get('email');
   if (token) {
     creds = { token };
+    refresh().catch((err) => {
+      $('#lookupCard').hidden = false;
+      toast(err.message, 'err');
+    });
+    return;
+  }
+  // Deep link from the order status page / emails: prefill and auto-look-up.
+  if (order) $('#orderNumber').value = order;
+  if (email) $('#email').value = email;
+  if (order && email) {
+    creds = { orderNumber: order, email };
     refresh().catch((err) => {
       $('#lookupCard').hidden = false;
       toast(err.message, 'err');

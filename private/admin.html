@@ -22,6 +22,14 @@
     .presult img, .presult .imgph { width: 36px; height: 36px; border-radius: 6px; object-fit: cover; background: var(--cream); flex: none; }
     .vbtn { font-size: 12px; padding: 4px 8px; }
     code { background: var(--cream); padding: 2px 6px; border-radius: 6px; word-break: break-all; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 14px; }
+    .tile { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .tile .num { font-size: 22px; font-weight: 700; color: var(--espresso); font-variant-numeric: tabular-nums; }
+    .tile .lbl { font-size: 12px; color: var(--muted); margin-top: 2px; }
+    .evt { display: flex; gap: 10px; font-size: 13px; padding: 6px 0; border-top: 1px solid var(--line); color: var(--muted); }
+    .evt:first-child { border-top: none; }
+    .evt .etype { font-weight: 600; color: var(--espresso); min-width: 70px; }
+    pre.snippet { background: var(--cream); border: 1px solid var(--line); border-radius: 10px; padding: 12px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -29,9 +37,19 @@
 
   <main class="wrap" style="padding:28px 20px 60px">
     <div class="card">
+      <h2>Activity</h2>
+      <p class="muted small">What the portal has handled for you (resets if the app is redeployed on an ephemeral host).</p>
+      <div class="tiles" id="activityTiles"></div>
+      <div id="activityRecent"></div>
+    </div>
+
+    <div class="card">
       <h2>What can customers do?</h2>
       <div class="row switch"><div><strong>Fix shipping address</strong><div class="desc">Let customers correct their delivery address (same country only).</div></div><input type="checkbox" id="allowAddressEdit" /></div>
       <div class="row switch"><div><strong>Swap items / change variant</strong><div class="desc">Switch size, grind, or another option of the same product.</div></div><input type="checkbox" id="allowVariantSwap" /></div>
+      <div class="row switch"><div><strong>Increase quantities</strong><div class="desc">Buy more of an item — the difference is collected via an emailed pay link.</div></div><input type="checkbox" id="allowQuantityEdit" /></div>
+      <div class="row switch"><div><strong>Reduce / remove items</strong><div class="desc">Creates a refund you process in Shopify admin (flagged in the order's staff notes).</div></div><input type="checkbox" id="allowItemRemoval" /></div>
+      <div class="row switch"><div><strong>Cancel the whole order</strong><div class="desc">Full self-service cancellation with refund to the original payment method. Run one live test before relying on it.</div></div><input type="checkbox" id="allowCancel" /></div>
       <div class="row switch"><div><strong>Add items / upsell</strong><div class="desc">Offer the curated products below as post-purchase add-ons.</div></div><input type="checkbox" id="allowUpsell" /></div>
     </div>
 
@@ -72,6 +90,17 @@
       </div>
       <button class="btn ghost" id="linkBtn" style="margin-top:6px">Generate link</button>
       <p id="linkOut" style="margin-top:12px"></p>
+    </div>
+
+    <div class="card">
+      <h2>Put the portal in front of customers</h2>
+      <p class="muted">Two copy-paste snippets. Customers land on the portal with their order already loaded — no typing.</p>
+      <h3 style="font-size:15px;margin:14px 0 6px">Order status page <span class="muted small">(Settings → Checkout → Order status page → Additional scripts)</span></h3>
+      <pre class="snippet" id="snippetStatus"></pre>
+      <button class="btn ghost vbtn" id="copyStatus">Copy</button>
+      <h3 style="font-size:15px;margin:18px 0 6px">Order confirmation email <span class="muted small">(Settings → Notifications → Order confirmation)</span></h3>
+      <pre class="snippet" id="snippetEmail"></pre>
+      <button class="btn ghost vbtn" id="copyEmail">Copy</button>
     </div>
   </main>
 

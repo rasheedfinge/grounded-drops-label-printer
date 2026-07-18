@@ -52,4 +52,29 @@ function isLineSwappable(li, settings) {
   return true;
 }
 
-module.exports = { orderEligibility, isLineSwappable };
+/**
+ * Whether a quantity change on a normalized line item is allowed.
+ * Increases are gated by allowQuantityEdit (balances are collected via a pay
+ * link); decreases/removals by allowItemRemoval (they create refunds the
+ * merchant processes). Returns { ok, reason }.
+ */
+function quantityChangeCheck(li, newQuantity, settings) {
+  if (!li) return { ok: false, reason: 'That item could not be found on the order.' };
+  if (li.isSubscription) return { ok: false, reason: 'Subscription items can’t be changed here.' };
+  if (li.merchantEditable === false) return { ok: false, reason: 'That item can’t be changed.' };
+  const q = Number(newQuantity);
+  if (!Number.isInteger(q) || q < 0 || q > 99) {
+    return { ok: false, reason: 'Please choose a quantity between 0 and 99.' };
+  }
+  const current = li.quantity || 0;
+  if (q === current) return { ok: false, reason: 'That’s already the quantity on your order.' };
+  if (q > current && settings && settings.allowQuantityEdit === false) {
+    return { ok: false, reason: 'Increasing quantities isn’t available for this order.' };
+  }
+  if (q < current && !(settings && settings.allowItemRemoval === true)) {
+    return { ok: false, reason: 'Reducing or removing items isn’t available here — contact us and we’ll help.' };
+  }
+  return { ok: true };
+}
+
+module.exports = { orderEligibility, isLineSwappable, quantityChangeCheck };

@@ -18,7 +18,8 @@ const express = require('express');
 const shopify = require('../shopify');
 const tokens = require('../tokens');
 const settingsStore = require('../settings');
-const { orderEligibility, isLineSwappable } = require('../eligibility');
+const events = require('../events');
+const { orderEligibility, isLineSwappable, quantityChangeCheck } = require('../eligibility');
 const config = require('../config');
 
 const router = express.Router();
@@ -149,7 +150,15 @@ function eligibilityPermissions(elig, settings) {
     address: elig.editable && settings.allowAddressEdit !== false,
     swap: elig.editable && settings.allowVariantSwap !== false,
     upsell: elig.editable && settings.allowUpsell !== false,
+    quantity: elig.editable && settings.allowQuantityEdit !== false,
+    remove: elig.editable && settings.allowItemRemoval === true,
+    cancel: elig.editable && settings.allowCancel === true,
   };
+}
+
+/** Whether a line's quantity may be adjusted at all (direction gates are per-permission). */
+function isQtyEditable(li) {
+  return Boolean(li) && !li.isSubscription && li.merchantEditable !== false && (li.quantity || 0) >= 1;
 }
 
 const fmtAmount = (n, currency) => `${currency} ${Math.abs(Number(n) || 0).toFixed(2)}`;
@@ -166,12 +175,12 @@ router.post('/lookup', lookupLimiter, async (req, res) => {
     const settings = settingsStore.load();
     const elig = orderEligibility(resolved.raw, settings);
     const order = shopify.normalizeOrder(resolved.raw);
+    const permissions = eligibilityPermissions(elig, settings);
     order.lineItems = order.lineItems.map((li) => ({
       ...li,
-      swappable: elig.editable && settings.allowVariantSwap !== false && isLineSwappable(li, settings),
+      swappable: permissions.swap && isLineSwappable(li, settings),
+      qtyEditable: (permissions.quantity || permissions.remove) && isQtyEditable(li),
     }));
-
-    const permissions = eligibilityPermissions(elig, settings);
     const upsellOffers = permissions.upsell ? await buildUpsellOffers(settings, resolved.raw) : [];
 
     return res.json({
@@ -270,6 +279,7 @@ router.post('/address', async (req, res) => {
 
     await withOrderLock(resolved.gid, () => shopify.updateShippingAddress(resolved.gid, address));
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
+    events.record('address', { orderName: fresh.name });
     return res.json({ ok: true, message: 'Your shipping address has been updated.', order: fresh });
   } catch (err) {
     console.error('[address]', err.message);
@@ -326,6 +336,7 @@ router.post('/swap', async (req, res) => {
     }));
 
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
+    events.record('swap', { orderName: fresh.name, value: result.outstanding });
     let message = 'Your item has been updated.';
     if (result.outstanding > 0) {
       message = result.invoiced
@@ -377,6 +388,7 @@ router.post('/upsell', async (req, res) => {
     }));
 
     const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
+    events.record('upsell', { orderName: fresh.name, value: result.outstanding, qty: quantity });
     let message = 'Added to your order!';
     if (result.invoiced) {
       message = `Added! We’ve emailed you a secure link to pay the ${fmtAmount(result.outstanding, fresh.currency)} balance — once paid, it ships with your order.`;
@@ -387,6 +399,96 @@ router.post('/upsell', async (req, res) => {
   } catch (err) {
     console.error('[upsell]', err.message);
     return res.status(400).json({ error: `We couldn't add that item: ${publicError(err, 'please try again or contact us.')}` });
+  }
+});
+
+// Change the quantity of a line item (0 removes it).
+router.post('/quantity', async (req, res) => {
+  try {
+    const resolved = await resolveOrder(req.body);
+    if (!resolved) return res.status(404).json({ error: 'Order not found.' });
+    const settings = settingsStore.load();
+    const elig = orderEligibility(resolved.raw, settings);
+    if (!elig.editable) {
+      return res.status(403).json({ error: 'This order can no longer be changed.' });
+    }
+    const order = shopify.normalizeOrder(resolved.raw);
+    const lineItemId = str(req.body.lineItemId, 100);
+    const newQuantity = parseInt(req.body.quantity, 10);
+    const li = order.lineItems.find((x) => x.id === lineItemId);
+
+    const check = quantityChangeCheck(li, newQuantity, settings);
+    if (!check.ok) return res.status(400).json({ error: check.reason });
+
+    if (newQuantity === 0) {
+      const others = order.lineItems.filter((x) => x.id !== li.id && (x.quantity || 0) > 0);
+      if (others.length === 0) {
+        return res.status(400).json({
+          error: settings.allowCancel === true
+            ? 'That’s the last item on the order — use “Cancel this order” below instead.'
+            : 'That’s the last item on the order — contact us and we’ll sort it out.',
+        });
+      }
+    }
+
+    const delta = newQuantity - li.quantity;
+    const result = await withOrderLock(resolved.gid, () => shopify.changeQuantity(resolved.gid, {
+      originalLineItemId: li.id,
+      originalVariantId: li.variantId,
+      newQuantity,
+      notifyCustomer: settings.notifyCustomerOnEdit !== false,
+      staffNote: `Self-service quantity change: ${li.title} ${li.variantTitle || ''} ${li.quantity} → ${newQuantity}`.trim(),
+      invoice: settings.invoiceForBalance !== false,
+      invoiceEmail: resolved.raw.email,
+      orderName: order.name,
+    }));
+
+    const fresh = shopify.normalizeOrder(await shopify.getOrderByGid(resolved.gid));
+    events.record('quantity', { orderName: fresh.name, value: result.outstanding, delta });
+    let message = newQuantity === 0 ? 'Item removed from your order.' : 'Quantity updated.';
+    if (result.outstanding > 0) {
+      message += result.invoiced
+        ? ` We’ve emailed you a secure link to pay the ${fmtAmount(result.outstanding, fresh.currency)} difference.`
+        : ` There’s a ${fmtAmount(result.outstanding, fresh.currency)} difference — we’ll be in touch about payment.`;
+    } else if (result.outstanding < 0) {
+      message += ` We owe you ${fmtAmount(result.outstanding, fresh.currency)} — we’ll refund the difference to your original payment method.`;
+    }
+    return res.json({ ok: true, message, outstanding: result.outstanding, order: fresh });
+  } catch (err) {
+    console.error('[quantity]', err.message);
+    return res.status(400).json({ error: `We couldn't update that quantity: ${publicError(err, 'please try again or contact us.')}` });
+  }
+});
+
+// Cancel the whole order (merchant opt-in; full refund to original payment).
+router.post('/cancel', async (req, res) => {
+  try {
+    const resolved = await resolveOrder(req.body);
+    if (!resolved) return res.status(404).json({ error: 'Order not found.' });
+    const settings = settingsStore.load();
+    if (settings.allowCancel !== true) {
+      return res.status(403).json({ error: 'Self-service cancellation is not available. Please contact us.' });
+    }
+    const elig = orderEligibility(resolved.raw, settings);
+    if (!elig.editable) {
+      return res.status(403).json({ error: 'This order can no longer be cancelled here. Please contact us.' });
+    }
+    const order = shopify.normalizeOrder(resolved.raw);
+
+    await withOrderLock(resolved.gid, () => shopify.cancelOrder(resolved.gid, {
+      staffNote: 'Self-service cancellation via order editor',
+      notifyCustomer: true,
+    }));
+
+    events.record('cancel', { orderName: order.name, value: order.total });
+    const paidSomething = order.financialStatus && order.financialStatus !== 'PENDING';
+    const message = paidSomething
+      ? `Your order ${order.name} has been cancelled. Your payment will be refunded to your original payment method — this usually takes a few business days.`
+      : `Your order ${order.name} has been cancelled.`;
+    return res.json({ ok: true, cancelled: true, message });
+  } catch (err) {
+    console.error('[cancel]', err.message);
+    return res.status(400).json({ error: `We couldn't cancel the order: ${publicError(err, 'please contact us and we’ll take care of it.')}` });
   }
 });
 

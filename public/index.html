@@ -64,8 +64,8 @@
       </div>
 
       <div class="card" id="swapCard" hidden>
-        <h2>Change an item</h2>
-        <p class="muted">Picked the wrong size or grind? Switch it below.</p>
+        <h2>Change your items</h2>
+        <p class="muted" id="itemsHint">Picked the wrong size or grind, or want a different amount? Adjust it below.</p>
         <div id="swapList"></div>
       </div>
 
@@ -73,6 +73,12 @@
         <h2 id="upsellHeading">Add to your order</h2>
         <p class="muted" id="upsellSubheading"></p>
         <div id="upsellGrid" class="offers"></div>
+      </div>
+
+      <div class="card" id="cancelCard" hidden>
+        <h2>Cancel this order</h2>
+        <p class="muted">Changed your mind? Cancel now and your payment goes back to your original payment method.</p>
+        <button type="button" class="btn danger" id="cancelBtn">Cancel my order</button>
       </div>
     </section>
   </main>

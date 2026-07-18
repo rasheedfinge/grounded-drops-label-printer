@@ -12,8 +12,20 @@ What customers can do (within an edit window):
 - **Swap an item** — change size / grind / blend to another variant of the same
   product (equal-or-cheaper by default). Any discount the customer originally
   received is carried over to the replacement line.
+- **Change quantities** — buy more (difference collected via a Shopify pay
+  link) or, if you enable it, reduce/remove items (flagged for refund).
 - **Add an item / upsell** — add a curated product at a discount; Shopify emails
   a secure link to pay the small balance, then it ships with the order.
+- **Cancel the order** *(opt-in, off by default)* — full self-service
+  cancellation with refund to the original payment method and restock.
+
+What you get as the merchant:
+
+- An **activity dashboard** in `/admin`: address fixes, item changes, upsell
+  revenue invoiced, cancellations, and a recent-events feed.
+- **Copy-paste install snippets** for the Shopify order status page and the
+  order confirmation email — customers deep-link into the portal with their
+  order pre-loaded (`/?order=…&email=…`).
 
 It's a plain Node/Express app that talks to the Shopify Admin GraphQL API. No
 database required.
@@ -33,8 +45,11 @@ Customer ──▶  /edit?token=…  (link in confirmation email / order-status 
          · address  → orderUpdate                    (country locked)
          · swap     → orderEditBegin → addVariant (+ carried-over discount)
                       → setQuantity(0, restock) → orderEditCommit → invoice if balance
+         · quantity → orderEditBegin → setQuantity → orderEditCommit
+                      → invoice if balance / flag refund if owed
          · upsell   → orderEditBegin → addVariant + lineItemDiscount
                       → orderEditCommit → orderInvoiceSend
+         · cancel   → orderCancel (refund + restock, opt-in)
 ```
 
 **Eligibility** mirrors Order Editing's "edit window": an order is editable only
@@ -94,24 +109,29 @@ npm start
 
 Open `/admin`, log in with `ADMIN_PASSWORD`, and:
 
-- toggle which edits are allowed and set the **edit window**,
+- toggle which edits are allowed (including quantity increases, item removal,
+  and cancellation) and set the **edit window**,
 - set the **upsell discount** and **curate upsell products** (search + add),
+- watch the **activity dashboard** fill up as customers help themselves,
 - generate a test **edit link** for any real order.
+
+> **Before enabling cancellation for customers**, run one live test on a real
+> (or staff-placed) order — it moves money via Shopify's refund flow.
 
 ## 5. Add the link for customers
 
-Put a per-customer signed link where customers will see it after ordering. The
-`/admin` "Generate an edit link" tool shows the exact URL format. In Shopify’s
-**order confirmation email** (Settings → Notifications → Order confirmation) you
-can add a button — the safest pattern is to send customers to the bare portal:
+The `/admin` screen has two ready-made snippets under **"Put the portal in
+front of customers"**:
 
-```html
-<a href="https://YOUR_APP_URL/">Need to change your order?</a>
-```
+- **Order status page** (Settings → Checkout → Order status page → Additional
+  scripts) — a button that deep-links into the portal with the customer's
+  order number and email prefilled, so their order loads instantly.
+- **Order confirmation email** (Settings → Notifications → Order confirmation)
+  — the same deep link, email-safe markup.
 
-…and let them enter their order number + email (no token needed). For one-click
-links you can generate signed tokens server-side and inject them; that’s a small
-enhancement on top of `tokens.sign()`.
+Prefer a manual route? Send customers to the bare portal URL and they enter
+their order number + email themselves. Signed one-click tokens are also
+available via the "Generate an edit link" tool (`tokens.sign()`).
 
 ---
 
@@ -157,9 +177,10 @@ src/config.js             env config
 src/shopify.js            Admin GraphQL client (+timeout/retry) + order operations
 src/tokens.js             signed edit-link tokens
 src/settings.js           merchant settings (defaults → file → env)
-src/eligibility.js        edit-window / line-item swap rules
-src/routes/portal.js      customer API (lookup, address, swap, upsell)
-src/routes/admin.js       merchant settings API (password protected)
+src/eligibility.js        edit-window / swap / quantity rules
+src/events.js             activity log for the admin dashboard
+src/routes/portal.js      customer API (lookup, address, swap, quantity, upsell, cancel)
+src/routes/admin.js       merchant settings + activity API (password protected)
 config/settings.default.json   committed default settings
 public/                   customer portal UI (no build step)
 private/                  admin UI, served only with credentials
@@ -168,12 +189,12 @@ test/                     unit tests (node --test)
 
 ## Not in this version (easy next steps)
 
-- Cancel order / remove items + refund-to-store-credit.
+- Refund-to-store-credit as a cancellation option.
 - Inline card payment for upsells (instead of an emailed pay link).
-- Automatic refunds for cheaper swaps (currently flagged for manual processing).
+- Automatic refunds for cheaper swaps / removals (currently flagged for manual
+  processing — full cancellations DO refund automatically).
 - Holding orders from a 3PL during the window (`fulfillmentOrderHold`) — useful
   only once fulfillment is automated.
-- One-click signed links auto-injected into Shopify notification emails.
 
 ## License
 

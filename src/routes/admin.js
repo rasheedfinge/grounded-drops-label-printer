@@ -13,6 +13,7 @@ const config = require('../config');
 const settingsStore = require('../settings');
 const shopify = require('../shopify');
 const tokens = require('../tokens');
+const events = require('../events');
 
 const router = express.Router();
 
@@ -93,6 +94,9 @@ router.post('/settings', express.json(), (req, res) => {
   if (b.allowAddressEdit !== undefined) patch.allowAddressEdit = Boolean(b.allowAddressEdit);
   if (b.allowVariantSwap !== undefined) patch.allowVariantSwap = Boolean(b.allowVariantSwap);
   if (b.allowUpsell !== undefined) patch.allowUpsell = Boolean(b.allowUpsell);
+  if (b.allowQuantityEdit !== undefined) patch.allowQuantityEdit = Boolean(b.allowQuantityEdit);
+  if (b.allowItemRemoval !== undefined) patch.allowItemRemoval = Boolean(b.allowItemRemoval);
+  if (b.allowCancel !== undefined) patch.allowCancel = Boolean(b.allowCancel);
   if (b.allowPricedSwaps !== undefined) patch.allowPricedSwaps = Boolean(b.allowPricedSwaps);
   if (b.notifyCustomerOnEdit !== undefined) patch.notifyCustomerOnEdit = Boolean(b.notifyCustomerOnEdit);
   if (b.invoiceForBalance !== undefined) patch.invoiceForBalance = Boolean(b.invoiceForBalance);
@@ -109,6 +113,11 @@ router.post('/settings', express.json(), (req, res) => {
 
   const saved = settingsStore.save(patch);
   res.json(saved);
+});
+
+// Portal activity: edit counts, invoiced revenue, recent events.
+router.get('/activity', (req, res) => {
+  res.json(events.summary());
 });
 
 // Product search to help curate upsell offers in the UI.

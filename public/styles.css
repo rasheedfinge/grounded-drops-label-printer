@@ -86,7 +86,21 @@ input.locked[readonly] { background: var(--cream); color: var(--muted); cursor: 
 .btn.primary:hover { filter: brightness(1.07); }
 .btn.ghost { background: #fff; color: var(--espresso); border-color: var(--line); }
 .btn.ghost:hover { background: var(--cream); }
+.btn.danger { background: #fff; color: var(--err); border-color: var(--err); }
+.btn.danger:hover { background: var(--errbg); }
 .btn:disabled { opacity: .55; cursor: not-allowed; filter: none; }
+
+/* quantity stepper */
+.qty { display: inline-flex; align-items: center; gap: 10px; }
+.qty button {
+  width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line);
+  background: #fff; color: var(--espresso); font-size: 16px; font-weight: 700;
+  cursor: pointer; line-height: 1;
+}
+.qty button:hover:not(:disabled) { background: var(--cream); }
+.qty button:disabled { opacity: .35; cursor: not-allowed; }
+.qty .qval { min-width: 22px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.item-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
 
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .grid .full { grid-column: 1 / -1; }

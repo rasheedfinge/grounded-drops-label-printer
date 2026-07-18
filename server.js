@@ -38,19 +38,48 @@ const mailer = process.env.SMTP_HOST
     })
   : null;
 
+// Behind Railway/Render/Heroku the app sits behind a proxy; without this,
+// req.ip is the proxy's address (breaking rate limiting) and req.protocol is
+// "http" (breaking generated referral links).
+app.set('trust proxy', 1);
+
 app.use(cors());
 
 // Allow the entry page to be embedded as an <iframe> in the Shopify storefront.
 // When SHOP_DOMAIN is set we restrict framing to that store (and self);
-// otherwise framing is left open for local/dev use.
+// otherwise framing is left open for local/dev use. The admin is never
+// frameable by other origins.
 const SHOP_DOMAIN = process.env.SHOP_DOMAIN || '';
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
-  if (SHOP_DOMAIN) {
+  if (req.path.startsWith('/admin')) {
+    res.set('Content-Security-Policy', "frame-ancestors 'self'");
+  } else if (SHOP_DOMAIN) {
     res.set('Content-Security-Policy', `frame-ancestors 'self' https://${SHOP_DOMAIN} https://*.myshopify.com`);
   }
   next();
 });
+
+// Lightweight per-IP rate limiter for the public entry endpoint, so a bot
+// can't stuff the giveaway or farm referral credits.
+const rateHits = new Map();
+function rateLimit(max, windowMs) {
+  return (req, res, next) => {
+    const now = Date.now();
+    if (rateHits.size > 10000) {
+      for (const [k, v] of rateHits) if (now - v.t > windowMs) rateHits.delete(k);
+    }
+    let rec = rateHits.get(req.ip);
+    if (!rec || now - rec.t > windowMs) {
+      rec = { t: now, n: 0 };
+      rateHits.set(req.ip, rec);
+    }
+    if (++rec.n > max) {
+      return res.status(429).json({ error: 'Too many requests — please try again in a minute.' });
+    }
+    next();
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Shopify webhook — must read the RAW body to verify the HMAC, so it is
@@ -106,7 +135,8 @@ app.post(
   }
 );
 
-app.use(express.json({ limit: '2mb' }));
+// 5mb so a large pasted customer-list import fits.
+app.use(express.json({ limit: '5mb' }));
 
 function baseUrl(req) {
   return PUBLIC_BASE_URL || `${req.protocol}://${req.get('host')}`;
@@ -137,7 +167,7 @@ app.get('/api/winners', (req, res) => {
   res.json({ winners: store.publicWinners() });
 });
 
-app.post('/api/enter', async (req, res) => {
+app.post('/api/enter', rateLimit(15, 60_000), async (req, res) => {
   const { name = '', email = '', ref = null } = req.body || {};
   const clean = String(email).trim().toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
@@ -210,6 +240,7 @@ app.post('/api/admin/giveaways', requireAdmin, (req, res) => {
     prize: prize.trim(),
     period,
   });
+  store.createInviteDraft(giveaway, baseUrl(req));
   res.status(201).json({ giveaway });
 });
 
@@ -298,8 +329,12 @@ app.post('/api/admin/drafts/:id/send', requireAdmin, async (req, res) => {
       if (!winner) return res.status(400).json({ error: 'No winner recorded for this giveaway.' });
       await mailer.sendMail({ from: MAIL_FROM, to: winner.email, subject: draft.subject, text: draft.body });
     } else {
-      // Announcement: BCC the whole entrant list in chunks.
-      const emails = store.participantEmails(draft.giveaway_id);
+      // Announcement goes to this giveaway's entrants; the invite/reminder
+      // goes to everyone who has ever entered. BCC'd in chunks.
+      const emails =
+        draft.type === 'invite'
+          ? store.allParticipantEmails()
+          : store.participantEmails(draft.giveaway_id);
       if (!emails.length) return res.status(400).json({ error: 'No entrants to send to.' });
       for (let i = 0; i < emails.length; i += 50) {
         await mailer.sendMail({

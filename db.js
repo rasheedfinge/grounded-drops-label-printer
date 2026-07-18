@@ -356,6 +356,38 @@ function publicWinners(limit = 12) {
 }
 
 // ---- Email drafts ----
+// Required on anything sent to a list (CAN-SPAM/GDPR): say why they got it
+// and how to stop. Kept in the draft body so the admin can reword it.
+const LIST_FOOTER = `
+
+—
+You’re receiving this because you entered a Grounded Drops giveaway.
+Reply “unsubscribe” and we’ll stop sending giveaway emails.`;
+
+/** Draft inviting past entrants to join a newly opened giveaway. */
+function createInviteDraft(giveaway, baseUrl = '') {
+  const month = periodMonthName(giveaway.period);
+  const enterUrl = baseUrl ? `${baseUrl}/` : '[your giveaway page URL]';
+  const prize = giveaway.prize || 'this month’s prize';
+  db.prepare('INSERT INTO email_drafts (giveaway_id, type, subject, body) VALUES (?, ?, ?, ?)').run(
+    giveaway.id,
+    'invite',
+    `The ${month} Grounded Drops giveaway is open \u{1F331}`,
+    `Hey Grounded Drops fam,
+
+A new month, a new giveaway — this time you could win ${prize}.
+
+Entering takes 10 seconds:
+
+${enterUrl}
+
+Every friend you refer after entering earns you a bonus entry, and orders count too.
+
+Good luck!
+— The Grounded Drops team${LIST_FOOTER}`
+  );
+}
+
 function createDraftsForWinner(giveaway, winner, baseUrl) {
   const month = periodMonthName(giveaway.period);
   const winnerPublic = displayName(winner.name, winner.email);
@@ -382,7 +414,7 @@ ${enterUrl}
 Pro tip: share your personal referral link after entering — every friend who joins earns you a bonus entry. Shopify orders count too.
 
 Good luck!
-— The Grounded Drops team`
+— The Grounded Drops team${LIST_FOOTER}`
   );
 
   insert.run(
@@ -436,6 +468,11 @@ function participantEmails(giveawayId) {
     .map((r) => r.email);
 }
 
+/** Every email that has ever entered any giveaway — the invite/reminder list. */
+function allParticipantEmails() {
+  return db.prepare('SELECT DISTINCT email FROM participants').all().map((r) => r.email);
+}
+
 // ---- Automatic monthly draw ----
 /**
  * Runs the monthly lifecycle. For every open giveaway whose month has ended:
@@ -470,6 +507,7 @@ function autoDrawTick({ baseUrl = '', autoCreate = true, now = new Date() } = {}
       prize: prev?.prize || '',
       period,
     });
+    createInviteDraft(created, baseUrl);
     actions.push({ action: 'created_giveaway', giveawayId: created.id, title: created.title });
   }
 
@@ -502,5 +540,7 @@ module.exports = {
   updateDraft,
   markDraftSent,
   participantEmails,
+  allParticipantEmails,
+  createInviteDraft,
   autoDrawTick,
 };

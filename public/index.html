@@ -70,7 +70,7 @@
           <input id="email" type="email" autocomplete="email" placeholder="you@example.com" required />
           <button type="submit" id="submitBtn">Enter the Giveaway</button>
         </form>
-        <div class="msg err" id="errMsg"></div>
+        <div class="msg" id="errMsg"></div>
       </div>
 
       <!-- Closed state -->
@@ -142,7 +142,7 @@
       e.preventDefault();
       const btn = el('submitBtn');
       const err = el('errMsg');
-      err.style.display = 'none';
+      err.classList.remove('err');
       btn.disabled = true;
       btn.textContent = 'Entering…';
       try {
@@ -165,7 +165,6 @@
       } catch (e2) {
         err.textContent = e2.message;
         err.classList.add('err');
-        err.style.display = 'block';
         btn.disabled = false;
         btn.textContent = 'Enter the Giveaway';
       }

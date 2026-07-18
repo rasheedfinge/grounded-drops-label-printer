@@ -82,9 +82,17 @@ With `AUTO_DRAW` on (the default) the app runs itself:
 4. Review/edit the drafts in the admin and hit **Send** (with SMTP configured)
    or copy them into your email tool. You can also click **Draw Winner** or
    **Run monthly cycle now** at any time instead of waiting.
+5. Every newly opened giveaway also gets an **invite draft** — a reminder you
+   can send to everyone who has ever entered, telling them the new month is
+   open. List emails include an unsubscribe note in the footer.
 
 Winners are only ever shown publicly as first name + surname initial — never
 their full name or email.
+
+Other notes:
+- `npm test` runs the test suite (entry/referral/purchase/draw/auto-cycle logic).
+- The public entry endpoint is rate-limited per IP to deter bots and referral farming.
+- The original thermal **label editor** still lives at `/label.html`.
 
 ## API reference
 
@@ -101,7 +109,7 @@ Admin (HTTP Basic auth):
 - `GET  /api/admin/giveaways/:id` — stats, entrants, winner, email drafts.
 - `POST /api/admin/giveaways/:id/draw` — draw the winner (once) + create email drafts.
 - `POST /api/admin/giveaways/:id/import` — bulk-import `{ text }` (one `email, name` per line) or `{ entries: [...] }`.
-- `PUT  /api/admin/drafts/:id` — edit a draft; `POST /api/admin/drafts/:id/send` — send it (needs SMTP).
+- `PUT  /api/admin/drafts/:id` — edit a draft; `POST /api/admin/drafts/:id/send` — send it (needs SMTP). Draft types: `announcement` (this giveaway's entrants), `winner` (the winner), `invite` (everyone who ever entered).
 - `POST /api/admin/auto-draw/run` — force the monthly cycle right now.
 - `GET  /api/admin/giveaways/:id/export.csv` — entrant export.
 

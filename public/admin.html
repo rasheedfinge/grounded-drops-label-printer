@@ -129,7 +129,12 @@
     }
 
     function draftCard(d) {
-      const label = d.type === 'announcement' ? '📣 Announcement — goes to the whole entrant list' : '🏆 Winner email — asks them to confirm details';
+      const labels = {
+        announcement: '📣 Announcement — goes to this giveaway’s entrants',
+        winner: '🏆 Winner email — asks them to confirm details',
+        invite: '📨 Invite — reminds everyone who ever entered to join this month',
+      };
+      const label = labels[d.type] || d.type;
       return `
         <div class="draft" data-id="${d.id}">
           <div class="head"><span class="t">${label}</span> <span class="pill ${d.status === 'sent' ? 'sent' : ''}">${d.status}${d.sent_at ? ' ' + d.sent_at : ''}</span></div>
@@ -139,7 +144,7 @@
           <textarea class="d-body" ${d.status === 'sent' ? 'disabled' : ''}>${escapeHtml(d.body)}</textarea>
           <div class="actions">
             ${d.status !== 'sent' ? `<button class="ghost d-save" type="button">Save draft</button>
-            <button class="d-send" type="button" ${mailerOn ? '' : 'title="Configure SMTP_HOST in .env to send from the app"'}>Send ${d.type === 'announcement' ? 'to list' : 'to winner'}</button>` : ''}
+            <button class="d-send" type="button" ${mailerOn ? '' : 'title="Configure SMTP_HOST in .env to send from the app"'}>Send ${{ announcement: 'to entrants', winner: 'to winner', invite: 'to past entrants' }[d.type] || ''}</button>` : ''}
             <button class="ghost d-copy" type="button">Copy text</button>
           </div>
           <div class="err d-msg"></div>
